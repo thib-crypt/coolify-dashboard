@@ -1,0 +1,29 @@
+/* ————————————————————————————— tokens */
+:root{
+  color-scheme:light;
+  --canvas:#f4f4f6;
+  --surface:#ffffff;
+  --surface-2:#fafafb;
+  --hover:rgba(9,9,11,.028);
+  --line:#eeeef1;
+  --line-2:#e3e3e8;
+  --t1:#17171a;
+  --t2:#5c5c66;
+  --t3:#8d8d97;
+  --accent:#2563eb;
+  --accent-2:#1d4ed8;
+  --accent-soft:#eff4ff;
+  --ok:#12a150;
+  --ok-soft:#e8f7ee;
+  --warn:#b45309;
+  --warn-soft:#fdf2e3;
+  --err:#dc2626;
+  --err-soft:#fdecec;
+  --sh-1:0 1px 2px rgba(16,24,40,.05);
+  --sh-2:0 1px 2px rgba(16,24,40,.05),0 1px 3px rgba(16,24,40,.04);
+  --sh-3:0 2px 4px -1px rgba(16,24,40,.07),0 6px 16px -6px rgba(16,24,40,.09);
+  --sh-pop:0 24px 64px -18px rgba(16,24,40,.24),0 6px 16px -8px rgba(16,24,40,.10);
+  --ease-out:cubic-bezier(.23,1,.32,1);
+  --ease-io:cubic-bezier(.77,0,.175,1);
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;
+}

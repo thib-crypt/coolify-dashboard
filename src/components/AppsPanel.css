@@ -1,0 +1,31 @@
+/* ————————————————————————————— apps */
+.approw{
+  display:flex;align-items:center;gap:12px;padding:12px 16px;
+  transition:background-color 150ms ease;
+}
+.approw + .approw{border-top:1px solid var(--line)}
+@media (hover:hover) and (pointer:fine){.approw:hover{background:var(--hover)}}
+.appic{
+  width:28px;height:28px;border-radius:8px;flex-shrink:0;
+  display:grid;place-items:center;font-size:11.5px;font-weight:600;color:#fff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 1px 2px rgba(16,24,40,.14);
+}
+.approw .id{min-width:0;flex:1}
+.approw .an{font-weight:550;letter-spacing:-.01em}
+.approw .ad{font-size:11.5px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.approw .up{font:11.5px var(--mono);color:var(--t2)}
+.approw .auto{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--t3)}
+/* toggle */
+.tgl{
+  position:relative;width:30px;height:18px;border-radius:99px;flex-shrink:0;
+  background:#dcdce2;box-shadow:inset 0 1px 2px rgba(16,24,40,.08);
+  transition:background-color 180ms ease,transform 140ms var(--ease-out);
+}
+.tgl::after{
+  content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;
+  background:#fff;box-shadow:0 1px 2px rgba(16,24,40,.22);
+  transition:transform 180ms var(--ease-out);
+}
+.tgl[aria-checked="true"]{background:var(--accent);box-shadow:inset 0 1px 2px rgba(16,24,40,.14)}
+.tgl[aria-checked="true"]::after{transform:translateX(12px)}
+.tgl:active{transform:scale(.94)}

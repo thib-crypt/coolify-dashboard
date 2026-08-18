@@ -1,0 +1,15 @@
+/* ————————————————————————————— pulse strip */
+.pulse{
+  position:relative;height:52px;flex-shrink:0;
+  background:var(--surface);
+  border-bottom:1px solid var(--line-2);overflow:hidden;
+}
+.pulse svg{position:absolute;inset:0;width:100%;height:100%}
+.pulse .fade{position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(90deg,var(--surface) 0,var(--surface) 240px,transparent 320px,transparent calc(100% - 90px),var(--surface))}
+.pulse .label{
+  position:absolute;left:24px;top:50%;translate:0 -50%;
+  display:flex;align-items:center;gap:8px;
+  font:11px var(--mono);color:var(--t3);z-index:2;
+}
+.pulse .label b{color:var(--t1);font-weight:500}

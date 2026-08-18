@@ -1,0 +1,29 @@
+/* ————————————————————————————— schedule */
+.timeline{position:relative;margin:34px 22px 8px;height:56px}
+.tl-line{position:absolute;left:0;right:0;top:20px;height:1px;background:var(--line-2)}
+.tl-tick{position:absolute;top:16px;width:1px;height:9px;background:#dcdce2}
+.tl-tick span{position:absolute;top:14px;left:50%;translate:-50% 0;font:10.5px var(--mono);color:var(--t3);white-space:nowrap}
+.tl-now{position:absolute;top:12px;width:1.5px;height:17px;border-radius:1px;background:var(--accent)}
+.tl-now::before{content:"";position:absolute;top:-4px;left:-2.2px;width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.14)}
+.tl-now span{position:absolute;top:-23px;left:50%;translate:-50% 0;font:10.5px var(--mono);color:var(--accent);white-space:nowrap}
+.job{position:absolute;top:14px;width:13px;height:13px;translate:-50% 0;cursor:default}
+.job i{
+  position:absolute;inset:2px;border-radius:50%;
+  background:var(--surface);border:2px solid #9c9caa;
+  box-shadow:0 0 0 3px var(--surface);
+  transition:transform 150ms var(--ease-out),border-color 150ms ease;
+}
+.job .job-tip{
+  position:absolute;bottom:calc(100% + 9px);left:50%;
+  transform:translateX(-50%) scale(.97);transform-origin:bottom center;
+  background:var(--surface);border:1px solid var(--line-2);border-radius:8px;
+  box-shadow:var(--sh-3);
+  padding:7px 11px;white-space:nowrap;opacity:0;pointer-events:none;z-index:10;
+  transition:opacity 125ms var(--ease-out),transform 125ms var(--ease-out);
+}
+.job .job-tip b{display:block;font-size:12px;font-weight:600;letter-spacing:-.01em}
+.job .job-tip span{font:10.5px var(--mono);color:var(--t3)}
+@media (hover:hover) and (pointer:fine){
+  .job:hover i{transform:scale(1.25);border-color:var(--accent)}
+  .job:hover .job-tip{opacity:1;transform:translateX(-50%) scale(1)}
+}

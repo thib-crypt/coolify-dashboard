@@ -1,0 +1,21 @@
+/* ————————————————————————————— insights */
+.ins{display:flex;gap:12px;padding:13px 16px;transition:background-color 150ms ease}
+.ins + .ins{border-top:1px solid var(--line)}
+@media (hover:hover) and (pointer:fine){.ins:hover{background:var(--hover)}}
+.ins .sev{margin-top:6px}
+.ins .body{min-width:0;flex:1}
+.ins .it{font-weight:550;letter-spacing:-.01em}
+.ins .idesc{color:var(--t3);margin-top:2px;font-size:12.5px;line-height:1.5}
+.ins .act{
+  margin-top:8px;display:inline-flex;align-items:center;gap:4px;
+  height:26px;padding:0 10px;border-radius:7px;
+  background:var(--surface);border:1px solid var(--line-2);box-shadow:var(--sh-1);
+  font-size:12px;font-weight:500;color:var(--t1);
+  transition:color 150ms ease,background-color 150ms ease,border-color 150ms ease,transform 140ms var(--ease-out);
+}
+.ins .act svg{width:11px;height:11px;color:var(--t3);transition:transform 150ms var(--ease-out)}
+.ins .act:active{transform:scale(.97)}
+@media (hover:hover) and (pointer:fine){
+  .ins .act:hover{background:var(--surface-2);border-color:#d5d5dc}
+  .ins .act:hover svg{transform:translateX(2px)}
+}
