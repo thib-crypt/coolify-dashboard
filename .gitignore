@@ -5,6 +5,6 @@ dist
 *.tsbuildinfo
 upstream/
 .env
-data/
+/data/
 *.sqlite
 *.sqlite-journal
