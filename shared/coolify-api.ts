@@ -144,11 +144,19 @@ export interface ApplicationSetting {
   stop_grace_period?: number | null
 }
 
+/**
+ * `GET /applications` **hides `id`** (`ApplicationsController::removeSensitiveData`)
+ * and does not eager-load `settings` — so the list alone cannot tell you
+ * auto-deploy state, and deployments (which reference `application_id`) cannot
+ * be joined to it by id. `GET /applications/{uuid}` returns both, plus a nested
+ * `environment` (with its `project`).
+ */
 export interface Application {
   id?: number
   uuid: string
   name: string
   description?: string | null
+  /** Comma-separated list of domains (`Application::fqdns` explodes on ','). */
   fqdn?: string | null
   git_repository?: string
   git_branch?: string
@@ -166,7 +174,10 @@ export interface Application {
   created_at?: IsoDateTime
   updated_at?: IsoDateTime
   deleted_at?: IsoDateTime | null
+  /** Only on `GET /applications/{uuid}`. */
   settings?: ApplicationSetting
+  /** Only on `GET /applications/{uuid}`. */
+  environment?: Environment & { project?: Project & { team?: Team } }
 }
 
 export interface PatchApplicationBody {
@@ -222,6 +233,13 @@ export interface Server {
   ip?: string
   user?: string
   port?: number
+  /**
+   * `GET /servers` copies these to the top level from `settings`
+   * (`ServersController::servers`) — the OpenAPI Server schema has neither.
+   * The list endpoint selects only id/name/uuid/ip/user/port/description.
+   */
+  is_reachable?: boolean
+  is_usable?: boolean
   proxy?: Record<string, unknown>
   proxy_type?: ProxyType | string
   high_disk_usage_notification_sent?: boolean
@@ -358,7 +376,11 @@ export interface Database {
   public_port?: number | null
   created_at?: IsoDateTime
   updated_at?: IsoDateTime
-  /** Attached by `GET /databases` (not in OpenAPI). */
+  /**
+   * Attached by `GET /databases` (not in OpenAPI), each with its `latest_log`
+   * eager-loaded — enough for "backups in the last 24 h" without a second call.
+   * `GET /databases/{uuid}/backups` returns the same configs with full `executions`.
+   */
   backup_configs?: ScheduledDatabaseBackup[]
 }
 

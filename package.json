@@ -4,18 +4,22 @@
   "version": "0.1.0",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.5"
   },
   "scripts": {
-    "dev": "concurrently -k -n web,bff -c cyan,magenta \"vite\" \"tsx watch server/index.ts\"",
+    "dev": "concurrently -k -n web,bff -c cyan,magenta \"vite\" \"npm run dev:bff\"",
     "dev:web": "vite",
-    "dev:bff": "tsx watch server/index.ts",
+    "dev:mock": "VITE_USE_MOCK=1 vite",
+    "dev:bff": "BFF_PORT=8787 tsx watch server/index.ts",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.server.json"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.server.json",
+    "test": "node --import tsx --test \"server/**/*.test.ts\"",
+    "test:watch": "node --import tsx --test --watch \"server/**/*.test.ts\""
   },
   "dependencies": {
     "@hono/node-server": "^1.19.0",
+    "cron-parser": "^5.10.0",
     "hono": "^4.8.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

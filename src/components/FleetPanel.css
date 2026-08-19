@@ -27,3 +27,6 @@
 .fleet-foot div + div{border-left:1px solid var(--line);padding-left:14px}
 .fleet-foot b{font-size:13.5px;font-weight:600;letter-spacing:-.02em}
 .fleet-foot span{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--t3);font-weight:500}
+/* no metrics source (Coolify exposes none over REST) — an empty rail, not a zero bar */
+.meter--unknown .bar{background:repeating-linear-gradient(90deg,#eeeef1 0 3px,transparent 3px 6px)}
+.meter--unknown .val{color:var(--t3)}

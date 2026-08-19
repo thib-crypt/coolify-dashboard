@@ -10,7 +10,8 @@ const mmss = (s: number) =>
 
 interface Props {
   deployment: Deployment
-  onCancel: (deployment: Deployment) => void
+  /** rejecting puts the row back in its running state */
+  onCancel: (deployment: Deployment) => void | Promise<void>
 }
 
 export function LiveDeployment({ deployment, onCancel }: Props) {
@@ -40,9 +41,13 @@ export function LiveDeployment({ deployment, onCancel }: Props) {
     return () => { clearInterval(rotate); clearTimeout(swap) }
   }, [cancelled, logs.length])
 
-  const cancel = () => {
+  const cancel = async () => {
     setCancelled(true)
-    onCancel(deployment)
+    try {
+      await onCancel(deployment)
+    } catch {
+      setCancelled(false)
+    }
   }
 
   return (
@@ -67,7 +72,7 @@ export function LiveDeployment({ deployment, onCancel }: Props) {
       </div>
       <div className="right">
         <span className="dur num">{mmss(seconds)}</span>
-        <HoldToCancel label="Hold to cancel" gone={cancelled} onHold={cancel} />
+        <HoldToCancel label="Hold to cancel" gone={cancelled} onHold={() => { void cancel() }} />
       </div>
       {!cancelled && <div className="dep-progress" aria-hidden="true"><i /></div>}
     </div>

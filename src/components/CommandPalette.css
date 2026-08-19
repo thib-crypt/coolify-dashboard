@@ -26,6 +26,9 @@
 .pal-item kbd{margin-left:auto;font:10.5px var(--mono);color:var(--t3);background:var(--surface-2);border:1px solid var(--line-2);border-radius:4px;padding:1px 5px}
 .pal-item[aria-selected="true"]{background:var(--accent-soft);color:var(--t1);font-weight:500}
 .pal-item[aria-selected="true"] svg{color:var(--accent)}
+/* armed destructive entry: it says what a second press will do */
+.pal-item--confirm,.pal-item--confirm[aria-selected="true"]{background:var(--err-soft);color:var(--err);font-weight:500}
+.pal-item--confirm svg,.pal-item--confirm[aria-selected="true"] svg{color:var(--err)}
 .pal-empty{padding:22px;text-align:center;color:var(--t3);font-size:12.5px}
 .pal-foot{
   display:flex;gap:14px;padding:9px 14px;background:var(--surface-2);

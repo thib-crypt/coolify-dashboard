@@ -2,6 +2,7 @@ import type { Dashboard, DataSource, EnvironmentName, Server, ServerMetrics } fr
 
 const dashboard: Dashboard = {
   org: 'orbit',
+  environment: 'Production',
   environments: ['Production', 'Staging'],
   systemStatus: { ok: true, label: 'All systems operational' },
 
@@ -112,7 +113,12 @@ const dashboard: Dashboard = {
     { id: 'hel1', name: 'hetzner-hel1', region: 'Helsinki', pingMs: 21, reachable: true, metrics: { cpu: 22, mem: 87, dsk: 55 } },
     { id: 'ash', name: 'hetzner-ash', region: 'Ashburn', pingMs: 96, reachable: true, metrics: { cpu: 12, mem: 38, dsk: 23 } },
   ],
-  fleetTotals: { vcpu: '18', memory: '64 GB', storage: '1.2 TB', regions: '3' },
+  fleetTotals: [
+    { id: 'vcpu', label: 'vCPU total', value: '18' },
+    { id: 'memory', label: 'Memory', value: '64 GB' },
+    { id: 'storage', label: 'Storage', value: '1.2 TB' },
+    { id: 'regions', label: 'Regions', value: '3' },
+  ],
 
   insights: [
     {
@@ -163,24 +169,28 @@ const dashboard: Dashboard = {
   },
 
   paletteActions: [
-    { id: 'deploy-api', icon: 'rocket', title: 'Deploy api-core', shortcut: 'D' },
-    { id: 'restart-worker', icon: 'rotate', title: 'Restart worker-queue' },
-    { id: 'logs-api', icon: 'logs', title: 'Open logs — api-core', shortcut: 'L' },
-    { id: 'add-server', icon: 'server', title: 'Add a server' },
-    { id: 'switch-staging', icon: 'swap', title: 'Switch to staging', shortcut: 'E' },
-    { id: 'rotate-tls', icon: 'shield', title: 'Rotate TLS certificate' },
-    { id: 'backup-pg', icon: 'db', title: 'Backup postgres-main now' },
-    { id: 'reclaim', icon: 'ghost', title: 'Reclaim idle previews' },
+    { id: 'deploy:app-api', icon: 'rocket', title: 'Deploy api-core', shortcut: 'D',
+      command: { kind: 'deploy', application: 'app-api' } },
+    { id: 'restart:app-worker', icon: 'rotate', title: 'Restart worker-queue',
+      command: { kind: 'restart', application: 'app-worker' } },
+    { id: 'stop:app-api', icon: 'stop', title: 'Stop api-core',
+      command: { kind: 'stop', application: 'app-api' }, confirm: 'Confirm — stop api-core' },
+    { id: 'task:application:app-api:nightly', icon: 'clock', title: 'Run nightly-sync — api-core',
+      command: { kind: 'run-task', owner: 'application', ownerId: 'app-api', task: 'nightly' } },
+    { id: 'switch-environment', icon: 'swap', title: 'Switch environment', shortcut: 'E',
+      command: { kind: 'ui', target: 'switch-environment' } },
   ],
 }
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v))
 
 export const mockSource: DataSource = {
-  async getDashboard(_env: EnvironmentName) {
+  async getDashboard(env: EnvironmentName | null) {
     // structuredClone so live drift never mutates the source of truth
-    return structuredClone(dashboard)
+    return { ...structuredClone(dashboard), environment: env ?? dashboard.environment }
   },
+
+  initialTraffic: () => INITIAL_TRAFFIC(),
 
   sampleTraffic(previous: number) {
     return clamp(previous + (Math.random() - 0.5) * 160, 850, 1600)
@@ -188,6 +198,8 @@ export const mockSource: DataSource = {
 
   sampleServer(server: Server): ServerMetrics {
     const m = server.metrics
+    // the mock always has numbers; the live source has nulls it must not drift
+    if (m.cpu === null || m.mem === null || m.dsk === null) return m
     return {
       cpu: clamp(m.cpu + (Math.random() - 0.5) * 7, 4, 97),
       mem: clamp(m.mem + (Math.random() - 0.5) * 2.5, 10, 97),
@@ -195,9 +207,24 @@ export const mockSource: DataSource = {
     }
   },
 
-  async triggerDeploy() {},
-  async cancelDeployment() {},
-  async setAutoDeploy() {},
+  async triggerDeploy() {
+    return { outcome: 'queued', message: 'Deployment queued.', deploymentUuid: 'mock-deployment' }
+  },
+  async cancelDeployment() {
+    return { outcome: 'done', message: 'Deployment cancelled.' }
+  },
+  async setAutoDeploy(_appId: string, enabled: boolean) {
+    return { outcome: 'done', message: `Auto-deploy ${enabled ? 'enabled' : 'disabled'}.` }
+  },
+  async restartApplication() {
+    return { outcome: 'queued', message: 'Restart request queued.' }
+  },
+  async stopApplication() {
+    return { outcome: 'done', message: 'Application stopping request queued.' }
+  },
+  async runScheduledTask() {
+    return { outcome: 'queued', message: 'Scheduled task execution queued.' }
+  },
 }
 
 export const INITIAL_TRAFFIC = () => 1100 + Math.random() * 300

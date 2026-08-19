@@ -1,8 +1,9 @@
+import { createBffSource } from './coolify'
 import { mockSource } from './mock'
 import type { DataSource } from './types'
 
-/* Single switch point between mock and live data.
-   The UI stays on the mock until phase 1 rewrites src/data/coolify.ts to call the BFF. */
-export const source: DataSource = mockSource
+/* Single switch point between live and mock data.
+   Live is the default; set VITE_USE_MOCK=1 to develop the UI without an instance. */
+export const source: DataSource = import.meta.env.VITE_USE_MOCK === '1' ? mockSource : createBffSource()
 
 export * from './types'

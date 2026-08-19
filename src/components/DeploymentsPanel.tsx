@@ -8,7 +8,7 @@ interface Props {
   deployments: Deployment[]
   count: number
   index?: number
-  onCancel: (deployment: Deployment) => void
+  onCancel: (deployment: Deployment) => void | Promise<void>
   onViewAll: (label: string) => void
 }
 

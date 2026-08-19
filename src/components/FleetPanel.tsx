@@ -11,13 +11,15 @@ const METERS = [
   { key: 'dsk', label: 'DSK' },
 ] as const
 
-function Meter({ label, value }: { label: string; value: number }) {
-  const warn = value >= 80
+/** `null` means Coolify has no metrics endpoint for this — an empty bar, not a zero. */
+function Meter({ label, value }: { label: string; value: number | null }) {
+  const unknown = value === null
+  const warn = !unknown && value >= 80
   return (
-    <div className={`meter${warn ? ' warn' : ''}`}>
+    <div className={`meter${warn ? ' warn' : ''}${unknown ? ' meter--unknown' : ''}`}>
       <b>{label}</b>
-      <div className="bar"><i style={{ transform: `scaleX(${value / 100})` }} /></div>
-      <span className="val num">{Math.round(value)}%</span>
+      <div className="bar"><i style={{ transform: `scaleX(${unknown ? 0 : value / 100})` }} /></div>
+      <span className="val num">{unknown ? '—' : `${Math.round(value)}%`}</span>
     </div>
   )
 }
@@ -33,7 +35,7 @@ export function FleetPanel({ servers: initial, totals, index }: Props) {
   const [servers, setServers] = useState(initial)
 
   useInterval(() => {
-    setServers(prev => prev.map(s => ({ ...s, metrics: source.sampleServer(s) as Server['metrics'] })))
+    setServers(prev => prev.map(s => ({ ...s, metrics: source.sampleServer(s) })))
   }, 2000)
 
   const allReachable = servers.every(s => s.reachable)
@@ -57,7 +59,7 @@ export function FleetPanel({ servers: initial, totals, index }: Props) {
             <span className="dot" style={{ '--c': server.reachable ? 'var(--ok)' : 'var(--err)' } as CSSProperties} />
             <span className="name">{server.name}</span>
             <span className="region">{server.region}</span>
-            <span className="ping num">{server.pingMs} ms</span>
+            <span className="ping num">{server.pingMs === null ? '—' : `${server.pingMs} ms`}</span>
           </div>
           <div className="meters">
             {METERS.map(m => <Meter key={m.key} label={m.label} value={server.metrics[m.key]} />)}
@@ -65,10 +67,9 @@ export function FleetPanel({ servers: initial, totals, index }: Props) {
         </div>
       ))}
       <div className="fleet-foot">
-        <div><b className="num">{totals.vcpu}</b><span>vCPU total</span></div>
-        <div><b className="num">{totals.memory}</b><span>Memory</span></div>
-        <div><b className="num">{totals.storage}</b><span>Storage</span></div>
-        <div><b className="num">{totals.regions}</b><span>Regions</span></div>
+        {totals.map(total => (
+          <div key={total.id}><b className="num">{total.value}</b><span>{total.label}</span></div>
+        ))}
       </div>
     </Panel>
   )

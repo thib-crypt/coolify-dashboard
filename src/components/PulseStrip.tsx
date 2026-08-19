@@ -7,7 +7,7 @@ import './PulseStrip.css'
 /** Edge-traffic conveyor: the group slides left by exactly one step per tick,
     then snaps back as the new sample is appended — so the line never jumps. */
 export function PulseStrip() {
-  const { series, width, latest, tick } = useTraffic()
+  const { series, width, latest, tick, available } = useTraffic()
   const group = useRef<SVGGElement>(null)
   const reduced = useReducedMotion()
   const anim = useRef<Animation | null>(null)
@@ -22,7 +22,7 @@ export function PulseStrip() {
       [{ transform: 'translateX(0)' }, { transform: `translateX(-${STEP}px)` }],
       { duration: TICK, easing: 'linear' },
     )
-  }, TICK)
+  }, available ? TICK : null)
 
   useEffect(() => () => anim.current?.cancel(), [])
 
@@ -30,16 +30,22 @@ export function PulseStrip() {
 
   return (
     <div className="pulse" aria-hidden="true">
-      <svg viewBox={`0 0 ${width} ${PULSE_HEIGHT}`} preserveAspectRatio="none">
-        <g ref={group}>
-          <path d={area} fill="rgba(37,99,235,.055)" />
-          <path d={line} fill="none" stroke="rgba(37,99,235,.34)" strokeWidth="1.5" strokeLinejoin="round" />
-        </g>
-      </svg>
+      {available && (
+        <svg viewBox={`0 0 ${width} ${PULSE_HEIGHT}`} preserveAspectRatio="none">
+          <g ref={group}>
+            <path d={area} fill="rgba(37,99,235,.055)" />
+            <path d={line} fill="none" stroke="rgba(37,99,235,.34)" strokeWidth="1.5" strokeLinejoin="round" />
+          </g>
+        </svg>
+      )}
       <div className="fade" />
       <div className="label">
-        <span className="dot" style={{ '--c': 'var(--ok)' } as React.CSSProperties} />
-        edge traffic&nbsp;·&nbsp;<b className="num">{(latest / 1000).toFixed(2)}k req/s</b>
+        <span className="dot" style={{ '--c': available ? 'var(--ok)' : 'var(--t3)' } as React.CSSProperties} />
+        {available ? (
+          <>edge traffic&nbsp;·&nbsp;<b className="num">{(latest / 1000).toFixed(2)}k req/s</b></>
+        ) : (
+          <>edge traffic&nbsp;·&nbsp;<b className="num">no source</b></>
+        )}
       </div>
     </div>
   )

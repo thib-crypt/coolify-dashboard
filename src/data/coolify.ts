@@ -1,56 +1,90 @@
-/* Live adapter — skeleton (phase 1).
-   Will call this repo's BFF (`/app/overview`), never Coolify from the browser.
-   Swap the export in src/data/index.ts when ready:
-     export const source = createCoolifySource()
-   No component needs to change: they only ever see the `Dashboard` shape. */
+/* Live adapter (phases 1–2).
+   Calls this repo's BFF — never Coolify directly: the API token stays on the
+   server, and one BFF serves any number of tabs within Coolify's per-user
+   rate limit. Components never learn the difference: they only see `Dashboard`
+   and `ActionResponse`. */
 
-import type { Dashboard, DataSource, EnvironmentName, Server, ServerMetrics } from './types'
+import { DashboardError } from './types'
+import type {
+  ActionResponse,
+  Dashboard,
+  DataSource,
+  EnvironmentName,
+  Server,
+  ServerMetrics,
+} from './types'
+import type { BffErrorResponse, OverviewResponse } from '@shared/bff'
 
-export interface CoolifyConfig {
-  /** e.g. https://coolify.example.com */
-  baseUrl: string
-  token: string
+async function readError(res: Response): Promise<DashboardError> {
+  let body: Partial<BffErrorResponse> = {}
+  try {
+    body = (await res.json()) as BffErrorResponse
+  } catch {
+    // non-JSON error (proxy, dev server) — fall through to the status line
+  }
+  const error = body.error
+  return new DashboardError(
+    error?.code ?? 'internal',
+    error?.message ?? `The dashboard API answered ${res.status} ${res.statusText}.`,
+    error?.hint,
+    error?.retryAfterSeconds,
+  )
 }
 
-export function createCoolifySource(config: CoolifyConfig): DataSource {
-  const api = async <T>(path: string): Promise<T> => {
-    const res = await fetch(`${config.baseUrl}/api/v1${path}`, {
-      headers: { Authorization: `Bearer ${config.token}`, Accept: 'application/json' },
-    })
-    if (!res.ok) throw new Error(`Coolify ${path} → ${res.status} ${res.statusText}`)
-    return res.json() as Promise<T>
+export function createBffSource(basePath = '/app'): DataSource {
+  async function call(path: string, init?: RequestInit): Promise<Response> {
+    try {
+      return await fetch(`${basePath}${path}`, {
+        ...init,
+        headers: {
+          Accept: 'application/json',
+          ...(init?.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        },
+      })
+    } catch {
+      throw new DashboardError(
+        'unreachable',
+        'Cannot reach the dashboard API.',
+        'Is the BFF running? `npm run dev` starts it on port 8787.',
+      )
+    }
   }
 
+  /** Every action goes through here, so they all fail the same way. */
+  async function act(path: string, body?: unknown): Promise<ActionResponse> {
+    const res = await call(path, {
+      method: 'POST',
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    })
+    if (!res.ok) throw await readError(res)
+    return (await res.json()) as ActionResponse
+  }
+
+  const app = (id: string) => `/applications/${encodeURIComponent(id)}`
+
   return {
-    async getDashboard(_env: EnvironmentName): Promise<Dashboard> {
-      // GET /applications  → applications[] + applicationCount
-      // GET /servers       → servers[] + fleetTotals
-      // GET /deployments   → deployments[] + deploymentCount
-      // (KPIs, insights and the schedule timeline are derived from the above)
-      void api
-      throw new Error('createCoolifySource: not implemented yet — map the endpoints above.')
+    async getDashboard(env: EnvironmentName | null): Promise<Dashboard> {
+      const query = env ? `?env=${encodeURIComponent(env)}` : ''
+      const res = await call(`/overview${query}`)
+      if (!res.ok) throw await readError(res)
+
+      const body = (await res.json()) as OverviewResponse
+      return body.dashboard
     },
 
-    sampleTraffic(previous: number) {
-      // No traffic endpoint in Coolify core — plug your proxy/Traefik metrics here.
-      return previous
-    },
+    // No traffic source in Coolify core — the strip says so instead of inventing one.
+    initialTraffic: () => null,
+    sampleTraffic: () => null,
 
-    sampleServer(server: Server): ServerMetrics {
-      // GET /servers/{uuid}/resources
-      return server.metrics
-    },
+    // No REST endpoint for CPU/RAM/disk; the gauges stay empty until phase 5.
+    sampleServer: (server: Server): ServerMetrics => server.metrics,
 
-    async triggerDeploy(_app: string) {
-      // GET /deploy?uuid={uuid}
-    },
-
-    async cancelDeployment(_id: string) {
-      // POST /deployments/{uuid}/cancel
-    },
-
-    async setAutoDeploy(_appId: string, _enabled: boolean) {
-      // PATCH /applications/{uuid} { instant_deploy / git webhook settings }
-    },
+    triggerDeploy: appId => act('/deploy', { uuid: appId }),
+    cancelDeployment: id => act(`/deployments/${encodeURIComponent(id)}/cancel`),
+    setAutoDeploy: (appId, enabled) => act(`${app(appId)}/autodeploy`, { enabled }),
+    restartApplication: appId => act(`${app(appId)}/restart`),
+    stopApplication: appId => act(`${app(appId)}/stop`),
+    runScheduledTask: (owner, ownerId, taskId) =>
+      act(`/${owner}s/${encodeURIComponent(ownerId)}/tasks/${encodeURIComponent(taskId)}/run`),
   }
 }

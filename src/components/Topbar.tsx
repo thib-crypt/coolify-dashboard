@@ -12,7 +12,8 @@ interface Props {
   systemStatus: { ok: boolean; label: string }
   searchRef: React.RefObject<HTMLButtonElement | null>
   onOpenPalette: () => void
-  onDeploy: () => void
+  /** resolves when Coolify has answered — the button's busy face follows it */
+  onDeploy: () => Promise<unknown>
 }
 
 export function Topbar({

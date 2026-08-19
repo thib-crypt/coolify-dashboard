@@ -14,6 +14,8 @@ interface Props {
 export function CommandPalette({ open, actions, onClose, onRun }: Props) {
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(0)
+  // id of the destructive entry waiting for a second press
+  const [pending, setPending] = useState<string | null>(null)
   const input = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLDivElement>(null)
 
@@ -23,6 +25,7 @@ export function CommandPalette({ open, actions, onClose, onRun }: Props) {
     if (!open) return
     setQuery('')
     setSelected(0)
+    setPending(null)
     input.current?.focus()
   }, [open])
 
@@ -35,6 +38,12 @@ export function CommandPalette({ open, actions, onClose, onRun }: Props) {
   const run = (index = selected) => {
     const action = items[index]
     if (!action) return
+    // destructive entries ask once: the first press arms them, the second runs
+    if (action.confirm && pending !== action.id) {
+      setPending(action.id)
+      setSelected(index)
+      return
+    }
     onClose()
     onRun(action)
   }
@@ -45,9 +54,11 @@ export function CommandPalette({ open, actions, onClose, onRun }: Props) {
       if (e.key === 'Escape') onClose()
       else if (e.key === 'ArrowDown') {
         e.preventDefault()
+        setPending(null)
         setSelected(s => (items.length ? (s + 1 + items.length) % items.length : 0))
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
+        setPending(null)
         setSelected(s => (items.length ? (s - 1 + items.length) % items.length : 0))
       } else if (e.key === 'Enter') run()
     }
@@ -68,21 +79,21 @@ export function CommandPalette({ open, actions, onClose, onRun }: Props) {
           autoComplete="off"
           spellCheck={false}
           value={query}
-          onChange={e => { setQuery(e.target.value); setSelected(0) }}
+          onChange={e => { setQuery(e.target.value); setSelected(0); setPending(null) }}
         />
         <div className="pal-list" ref={list} role="listbox">
           {items.length ? (
             items.map((action, i) => (
               <button
                 key={action.id}
-                className="pal-item"
+                className={`pal-item${pending === action.id ? ' pal-item--confirm' : ''}`}
                 role="option"
                 aria-selected={i === selected}
                 onClick={() => run(i)}
                 onMouseMove={() => { if (i !== selected) setSelected(i) }}
               >
                 <PaletteIcon name={action.icon} />
-                {action.title}
+                {pending === action.id ? action.confirm : action.title}
                 {action.shortcut && <kbd>{action.shortcut}</kbd>}
               </button>
             ))

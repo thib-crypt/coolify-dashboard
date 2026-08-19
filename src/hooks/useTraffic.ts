@@ -1,18 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
 import { source } from '../data'
-import { INITIAL_TRAFFIC } from '../data/mock'
 
 export const STEP = 20
 export const PULSE_HEIGHT = 52
 export const TICK = 1200
 
 /** The conveyor sparkline behind the topbar: one new sample every 1200 ms,
-    the whole series shifted left by exactly one step. */
+    the whole series shifted left by exactly one step.
+    Coolify core has no traffic metrics, so a source may report `null` — the
+    strip then says it has no data instead of drawing an invented line. */
 export function useTraffic() {
   const [width, setWidth] = useState(() => innerWidth)
   const count = Math.ceil(width / STEP) + 3
+  const [available] = useState(() => source.initialTraffic() !== null)
   const [series, setSeries] = useState<number[]>(() =>
-    Array.from({ length: Math.ceil(innerWidth / STEP) + 3 }, INITIAL_TRAFFIC),
+    Array.from({ length: Math.ceil(innerWidth / STEP) + 3 }, () => source.initialTraffic() ?? 0),
   )
 
   useEffect(() => {
@@ -26,7 +28,7 @@ export function useTraffic() {
     setSeries(prev => {
       if (prev.length === count) return prev
       const next = [...prev]
-      while (next.length < count) next.unshift(next[0])
+      while (next.length < count) next.unshift(next[0] ?? 0)
       while (next.length > count) next.shift()
       return next
     })
@@ -34,13 +36,13 @@ export function useTraffic() {
 
   const tick = useCallback(() => {
     setSeries(prev => {
-      const next = source.sampleTraffic(prev[prev.length - 1]) as number
-      return [...prev.slice(1), next]
+      const next = source.sampleTraffic(prev[prev.length - 1] ?? 0)
+      return next === null ? prev : [...prev.slice(1), next]
     })
   }, [])
 
   const latest = series[series.length - 1] ?? 0
-  return { series, width, count, latest, tick }
+  return { series, width, count, latest, tick, available }
 }
 
 /** Builds the `d` attribute for the line + the closed area path. */

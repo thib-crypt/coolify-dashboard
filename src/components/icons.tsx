@@ -133,6 +133,8 @@ export const IconStatusErr = (p: P) => (
 const PALETTE_PATHS = {
   rocket: <path d="M5 15c-1.5 1.5-2 5-2 5s3.5-.5 5-2m-1-6.5C8.5 7 12 3.5 17.5 3c.5 0 1 .5 1 1-.5 5.5-4 9-8.5 10.5L7 11.5zM14 9a1.5 1.5 0 1 0 .01 0z" />,
   rotate: <path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4" />,
+  stop: <rect x="6" y="6" width="12" height="12" rx="2" />,
+  clock: <path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3.5 2" />,
   logs: <path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4" />,
   server: (
     <>
