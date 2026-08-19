@@ -1,13 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import {
-  DashboardError,
-  source,
-  type ActionOutcome,
-  type ActionResponse,
-  type Dashboard,
-  type EnvironmentName,
-  type PaletteAction,
-} from './data'
+import { DashboardError, source, type ActionOutcome, type ActionResponse, type PaletteAction } from './data'
 import { AppsPanel } from './components/AppsPanel'
 import { CommandPalette } from './components/CommandPalette'
 import { DeploymentsPanel } from './components/DeploymentsPanel'
@@ -21,37 +13,16 @@ import { Rail } from './components/Rail'
 import { SchedulePanel } from './components/SchedulePanel'
 import { Toasts } from './components/Toasts'
 import { Topbar } from './components/Topbar'
+import { useLiveDashboard } from './hooks/useLiveDashboard'
 import { useToast } from './hooks/useToasts'
 
 export default function App() {
   const { toast } = useToast()
-  // null until the first payload arrives: the source decides the default environment
-  const [environment, setEnvironment] = useState<EnvironmentName | null>(null)
-  const [data, setData] = useState<Dashboard | null>(null)
-  const [error, setError] = useState<DashboardError | null>(null)
-  const [reloads, setReloads] = useState(0)
+  // The hook owns the payload, the SSE channel and the fallback poll: this
+  // component only reacts to what it publishes.
+  const { data, error, setEnvironment, reload, connected, logs, awaitDeployment } = useLiveDashboard()
   const [paletteOpen, setPaletteOpen] = useState(false)
   const searchRef = useRef<HTMLButtonElement>(null)
-
-  useEffect(() => {
-    let alive = true
-    source.getDashboard(environment).then(
-      dashboard => {
-        if (!alive) return
-        setData(dashboard)
-        setError(null)
-      },
-      cause => {
-        if (!alive) return
-        setError(
-          cause instanceof DashboardError
-            ? cause
-            : new DashboardError('internal', cause instanceof Error ? cause.message : String(cause)),
-        )
-      },
-    )
-    return () => { alive = false }
-  }, [environment, reloads])
 
   const closePalette = useCallback(() => {
     setPaletteOpen(false)
@@ -98,14 +69,34 @@ export default function App() {
     failure: string,
     action: () => Promise<ActionResponse>,
     options: { refresh?: boolean } = {},
-  ) => {
+  ): Promise<ActionResponse> => {
     try {
-      announce(await action())
-      if (options.refresh) setReloads(n => n + 1)
+      const result = await action()
+      announce(result)
+      // A push will say so too, but only once Coolify has caught up; refreshing
+      // here is what makes the click feel immediate.
+      if (options.refresh) reload()
+      return result
     } catch (cause) {
       report(cause, failure)
       throw cause
     }
+  }
+
+  /**
+   * Deploy, then keep the caller busy until Coolify has finished building.
+   *
+   * The Deploy button's "Deploying" face lasts exactly as long as the promise
+   * it was handed — before phase 3 that was the length of the HTTP request,
+   * which is a few hundred milliseconds of a build that takes minutes. Now the
+   * live channel says when the deployment actually ended, so the button waits
+   * for that instead. A skipped deploy has no deployment to wait for.
+   */
+  const deployAndWatch = async (appId: string, name: string) => {
+    const result = await runAction(`Could not deploy ${name}`, () => source.triggerDeploy(appId), {
+      refresh: true,
+    })
+    if (result.deploymentUuid) await awaitDeployment(result.deploymentUuid)
   }
 
   const nameOf = (id: string) => data?.applications.find(app => app.id === id)?.name ?? id
@@ -146,12 +137,12 @@ export default function App() {
     }
   }
 
-  if (error) {
+  if (error && !data) {
     return (
       <LoadError
         message={error.message}
         {...(error.hint ? { hint: error.hint } : {})}
-        onRetry={() => { setError(null); setReloads(n => n + 1) }}
+        onRetry={reload}
       />
     )
   }
@@ -178,11 +169,7 @@ export default function App() {
                 toast('No application to deploy', 'var(--t3)')
                 return Promise.reject(new Error('No application to deploy'))
               }
-              return runAction(
-                `Could not deploy ${target.name}`,
-                () => source.triggerDeploy(target.id),
-                { refresh: true },
-              )
+              return deployAndWatch(target.id, target.name)
             }}
           />
 
@@ -197,11 +184,13 @@ export default function App() {
                 deployments={data.deployments}
                 count={data.deploymentCount}
                 index={2}
-                onCancel={d =>
-                  runAction(`Could not cancel ${d.app}`, () => source.cancelDeployment(d.id), {
+                logs={logs}
+                streaming={connected}
+                onCancel={async d => {
+                  await runAction(`Could not cancel ${d.app}`, () => source.cancelDeployment(d.id), {
                     refresh: true,
                   })
-                }
+                }}
                 onViewAll={quietAction}
               />
               {/* keyed by environment: these panels hold their own copy of the data */}

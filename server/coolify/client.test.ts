@@ -10,6 +10,9 @@ const config: ConfiguredBffConfig = {
   dataDir: '.',
   requestTimeoutMs: 1000,
   deploymentHistoryTake: 5,
+  webhookSecret: null,
+  pollActiveMs: 3000,
+  pollIdleMs: 15000,
 }
 
 interface Call {

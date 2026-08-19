@@ -10,10 +10,11 @@ import type {
   Dashboard,
   DataSource,
   EnvironmentName,
+  LiveUpdate,
   Server,
   ServerMetrics,
 } from './types'
-import type { BffErrorResponse, OverviewResponse } from '@shared/bff'
+import type { BffErrorResponse, LiveEvent, OverviewResponse } from '@shared/bff'
 
 async function readError(res: Response): Promise<DashboardError> {
   let body: Partial<BffErrorResponse> = {}
@@ -70,6 +71,35 @@ export function createBffSource(basePath = '/app'): DataSource {
 
       const body = (await res.json()) as OverviewResponse
       return body.dashboard
+    },
+
+    /**
+     * SSE, one listener: the BFF sends unnamed frames so everything lands on
+     * `message` with its kind inside the payload.
+     *
+     * `EventSource` reconnects by itself, and the BFF is idempotent about what
+     * it pushes — log frames carry their absolute offset, finished deployments
+     * are keyed — so a reconnection needs nothing rebuilt by hand. An `error`
+     * only means the transport dropped; it is reported so the UI stops
+     * pretending, and the next `hello` says it is back.
+     */
+    subscribe(listener: (update: LiveUpdate) => void): () => void {
+      const stream = new EventSource(`${basePath}/events`)
+
+      stream.onmessage = message => {
+        try {
+          listener(JSON.parse(message.data as string) as LiveEvent)
+        } catch {
+          // A frame we cannot parse is not a reason to tear the channel down.
+        }
+      }
+      stream.onerror = () => listener({ type: 'offline' })
+
+      return () => {
+        stream.onmessage = null
+        stream.onerror = null
+        stream.close()
+      }
     },
 
     // No traffic source in Coolify core — the strip says so instead of inventing one.

@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { POLL_ACTIVE_MS, POLL_IDLE_MS } from './poller'
 
 export interface BffConfig {
   /** Coolify instance root, no trailing slash and no `/api/v1` suffix. */
@@ -10,6 +11,15 @@ export interface BffConfig {
   requestTimeoutMs: number
   /** how many deployments to pull per application when building history */
   deploymentHistoryTake: number
+  /**
+   * Shared secret expected in the query string of `/app/hooks/coolify`.
+   * `null` disables the route — Coolify's webhooks are unsigned, so accepting
+   * them without a secret would let anyone forge a toast in the dashboard.
+   */
+  webhookSecret: string | null
+  /** poll cadence while a deployment is running / while nothing is (annexe B) */
+  pollActiveMs: number
+  pollIdleMs: number
 }
 
 export interface ConfiguredBffConfig extends BffConfig {
@@ -40,6 +50,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BffConfig {
     dataDir: env.DATA_DIR?.trim() || path.resolve('data'),
     requestTimeoutMs: Number(env.COOLIFY_TIMEOUT_MS ?? 10_000),
     deploymentHistoryTake: Number(env.DEPLOYMENT_HISTORY_TAKE ?? 20),
+    webhookSecret: env.WEBHOOK_SECRET?.trim() || null,
+    pollActiveMs: Number(env.POLL_ACTIVE_MS ?? POLL_ACTIVE_MS),
+    pollIdleMs: Number(env.POLL_IDLE_MS ?? POLL_IDLE_MS),
   }
 }
 

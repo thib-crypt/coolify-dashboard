@@ -196,6 +196,10 @@ export const mockSource: DataSource = {
     return clamp(previous + (Math.random() - 0.5) * 160, 850, 1600)
   },
 
+  // No live channel: the mock has nothing to push, so the UI keeps looping the
+  // canned log lines instead of streaming them.
+  subscribe: () => () => {},
+
   sampleServer(server: Server): ServerMetrics {
     const m = server.metrics
     // the mock always has numbers; the live source has nulls it must not drift

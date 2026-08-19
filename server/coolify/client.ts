@@ -70,6 +70,12 @@ export interface CoolifyClient {
   servers(): Promise<Api.Server[]>
   /** only `queued` + `in_progress` — history is per application */
   runningDeployments(): Promise<Api.ApplicationDeploymentQueue[]>
+  /**
+   * The only way to see a deployment once it has left `/deployments`: that list
+   * drops anything not `queued`/`in_progress`, so a build that just ended is
+   * invisible there. The poller reads its terminal status here.
+   */
+  deployment(uuid: string): Promise<Api.ApplicationDeploymentQueue>
   applicationDeployments(uuid: string, take: number): Promise<Api.ApplicationDeploymentsPage>
   applicationScheduledTasks(uuid: string): Promise<Api.ScheduledTask[]>
   services(): Promise<Api.Service[]>
@@ -198,6 +204,8 @@ export function createCoolifyClient(config: ConfiguredBffConfig): CoolifyClient 
     application: uuid => getJson<Api.Application>(`/applications/${encodeURIComponent(uuid)}`),
     servers: () => getArray<Api.Server>('/servers'),
     runningDeployments: () => getArray<Api.ApplicationDeploymentQueue>('/deployments'),
+    deployment: uuid =>
+      getJson<Api.ApplicationDeploymentQueue>(`/deployments/${encodeURIComponent(uuid)}`),
     applicationDeployments: (uuid, take) =>
       getJson<Api.ApplicationDeploymentsPage>(
         `/deployments/applications/${encodeURIComponent(uuid)}?skip=0&take=${take}`,

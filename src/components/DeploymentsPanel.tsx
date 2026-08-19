@@ -8,6 +8,10 @@ interface Props {
   deployments: Deployment[]
   count: number
   index?: number
+  /** live log lines per deployment id, pushed by the BFF */
+  logs: Record<string, string[]>
+  /** true while the push channel is up — the ticker drains instead of looping */
+  streaming: boolean
   onCancel: (deployment: Deployment) => void | Promise<void>
   onViewAll: (label: string) => void
 }
@@ -35,7 +39,7 @@ function FinishedRow({ deployment }: { deployment: Deployment }) {
   )
 }
 
-export function DeploymentsPanel({ deployments, count, index, onCancel, onViewAll }: Props) {
+export function DeploymentsPanel({ deployments, count, index, logs, streaming, onCancel, onViewAll }: Props) {
   return (
     <Panel
       title="Deployments"
@@ -46,7 +50,15 @@ export function DeploymentsPanel({ deployments, count, index, onCancel, onViewAl
     >
       {deployments.map(d =>
         d.state === 'running'
-          ? <LiveDeployment key={d.id} deployment={d} onCancel={onCancel} />
+          ? (
+            <LiveDeployment
+              key={d.id}
+              deployment={d}
+              lines={logs[d.id] ?? d.logs ?? []}
+              streaming={streaming}
+              onCancel={onCancel}
+            />
+          )
           : <FinishedRow key={d.id} deployment={d} />,
       )}
     </Panel>

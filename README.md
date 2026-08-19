@@ -10,15 +10,15 @@ cp .env.example .env    # y mettre COOLIFY_URL + COOLIFY_TOKEN
 npm run dev             # front : http://localhost:5180 · BFF : http://127.0.0.1:8787
                         # proxy Vite : /app → 8787
 npm run dev:mock        # front seul, sur les données du mock (sans instance)
-npm test                # mappers, cache, client, actions (node:test)
+npm test                # mappers, cache, client, actions, hub, poller, webhooks (node:test)
 npm run typecheck
 npm run build
 ```
 
-**Le dashboard affiche les données réelles de l'instance et agit dessus**
-(phases 1 et 2 faites). Sans `.env`, le BFF répond 503 et le front affiche
-l'erreur avec la marche à suivre. Pour travailler l'UI sans instance :
-`npm run dev:mock`.
+**Le dashboard affiche les données réelles de l'instance, agit dessus et se met
+à jour tout seul** (phases 1 à 3 faites). Sans `.env`, le BFF répond 503 et le
+front affiche l'erreur avec la marche à suivre. Pour travailler l'UI sans
+instance : `npm run dev:mock`.
 
 ## Structure
 
@@ -28,18 +28,23 @@ src/                  front React (existant)
 ├── data/
 │   ├── types.ts      DataSource + réexport du modèle Dashboard
 │   ├── mock.ts       données du mockup
-│   ├── coolify.ts    adaptateur live → GET /app/overview
+│   ├── coolify.ts    adaptateur live → GET /app/overview + SSE /app/events
 │   └── index.ts      seul point de bascule mock ↔ live
 ├── hooks/
+│   └── useLiveDashboard.ts   payload + canal live + polling de secours
 └── components/
 shared/               types partagés front / BFF
 ├── dashboard.ts      modèle Dashboard
 ├── coolify-api.ts    types de l'API Coolify (écrits à la main)
 └── bff.ts            contrat `/app/*`
 server/               BFF Hono (port 8787)
-├── index.ts          routes : /app/health · /app/overview · les actions (POST)
+├── index.ts          routes : /app/health · /app/overview · /app/events (SSE)
+│                     · /app/hooks/coolify · les actions (POST)
 ├── actions.ts        écritures : lit ce que Coolify a *vraiment* fait, purge le cache
-├── config.ts         COOLIFY_URL / COOLIFY_TOKEN / BFF_PORT / DATA_DIR
+├── events.ts         hub SSE : diffusion + déduplication poller ↔ webhooks
+├── poller.ts         boucle adaptative 2,5 s / 4 s, à l'arrêt si personne n'écoute
+├── hooks.ts          webhooks entrants : secret constant-time, payload → effets
+├── config.ts         COOLIFY_URL / COOLIFY_TOKEN / BFF_PORT / DATA_DIR / WEBHOOK_SECRET
 ├── cache.ts          cache TTL par famille : single-flight + valeur périmée si l'amont tombe
 ├── store.ts          snapshots horaires (node:sqlite) → deltas et sparklines des KPIs
 ├── overview.ts       agrégateur : ~10 endpoints Coolify → un seul `Dashboard`
@@ -62,14 +67,28 @@ peut pas casser le responsive.
    - `dashboard-actions` : `deploy` + `write` (deploy, cancel, toggle auto-deploy, run task).
    Le compte créateur doit être **admin/owner** de la team.
 3. Copier l'URL de l'instance et un token dans `.env` (voir `.env.example`).
-4. Plus tard : IP allowlist du BFF, webhook sortant, Sentinel — détaillés dans `PLAN.md` (annexe A).
+4. **Webhook sortant** (optionnel, phase 3) : mettre un `WEBHOOK_SECRET` dans `.env`, puis
+   ```
+   PATCH /api/v1/notifications/webhook
+   { "webhook_enabled": true,
+     "webhook_url": "https://<dashboard>/app/hooks/coolify?secret=<WEBHOOK_SECRET>",
+     "deployment_success_webhook_notifications": true,
+     "deployment_failure_webhook_notifications": true,
+     "status_change_webhook_notifications": true,
+     "server_unreachable_webhook_notifications": true,
+     "backup_failure_webhook_notifications": true }
+   ```
+   Coolify **refuse** une URL loopback ou privée (`SafeWebhookUrl`) : le BFF doit être joignable
+   publiquement. Sans webhook, le dashboard reste à jour par polling, juste un peu plus tard.
+5. Plus tard : IP allowlist du BFF, Sentinel — détaillés dans `PLAN.md` (annexe A).
 
 ## Données live — ce qui est réel, ce qui ne l'est pas
 
-`src/data/coolify.ts` appelle `GET /app/overview?env=` sur le BFF. **Le navigateur
-ne contacte jamais Coolify** : le token reste côté serveur, et un seul BFF sert
-n'importe quel nombre d'onglets dans le budget de 200 req/min *par utilisateur*
-(20 requêtes simultanées ⇒ 1 appel amont ; ~14 appels/min en régime établi).
+`src/data/coolify.ts` appelle `GET /app/overview?env=` sur le BFF et écoute
+`GET /app/events`. **Le navigateur ne contacte jamais Coolify** : le token reste
+côté serveur, et un seul BFF sert n'importe quel nombre d'onglets dans le budget
+de 200 req/min *par utilisateur* (20 requêtes simultanées ⇒ 1 appel amont ;
+< 35 appels/min en régime établi, 0 quand aucun onglet n'est ouvert).
 
 Réel dès maintenant : organisation, environnements, applications (nom, domaine,
 statut, auto-deploy), serveurs et joignabilité, déploiements en cours et
@@ -143,6 +162,83 @@ re-parser, et `Stop` demande une confirmation dans la palette elle-même.
 - La file de déploiement pleine et le rate limiter répondent tous les deux 429 :
   c'est le message qui tranche.
 
+## Temps réel (phase 3)
+
+Le dashboard ne se rafraîchit plus à la main. Le BFF pousse en **SSE** sur
+`GET /app/events`, alimenté par deux sources qui se recouvrent volontairement :
+
+| Source | Ce qu'elle voit | Latence |
+|---|---|---|
+| Poller `/deployments` | déploiements qui **démarrent**, logs qui s'allongent, déploiements qui finissent | 2,5 s en build, 4 s au repos |
+| Webhooks entrants | fins de déploiement, serveur injoignable, disque plein, backup/tâche en échec | immédiat |
+
+Les webhooks sont le chemin rapide **quand ils sont configurés** ; le poller est
+le plancher quand ils ne le sont pas. Aucun des deux n'est indispensable :
+si le flux SSE est coupé (proxy qui bufferise, filtre d'entreprise, laptop en
+veille), le front retombe sur un fetch toutes les 10 s au lieu de 60 s.
+
+Événements poussés — `hello` (+ ce que le canal ne peut pas livrer),
+`overview-changed` (refetch de `/app/overview`, coalescé à 250 ms côté front),
+`deployment-log` (nouvelles lignes, avec leur index absolu), `deployment-finished`
+et `toast`.
+
+Ce qui devient réel dans l'UI :
+
+- le **ticker de logs** défile ligne à ligne sur le vrai log du build, au lieu de
+  tourner en boucle sur un tableau figé (il tient la dernière ligne quand il a
+  rattrapé le flux, au lieu de reboucler) ;
+- le **chrono** est ancré sur un instant de départ, pas sur un compteur de ticks —
+  un onglet en arrière-plan voit ses timers throttlés et perdait des secondes ;
+- le **bouton Deploy** reste sur « Deploying » jusqu'à la **fin du build**, plus
+  seulement jusqu'à la réponse HTTP (quelques centaines de ms sur un build de
+  plusieurs minutes) ;
+- la **fin d'un déploiement** arrive en toast, sans refresh.
+
+### Ce que ça coûte, et pourquoi c'est moins que prévu
+
+Le poller **s'arrête quand plus aucun navigateur n'est connecté** : au repos, sans
+onglet ouvert, le BFF ne fait aucune requête. Et il ne poll que `/deployments` :
+cette liste **porte déjà les `logs`** quand le token a `read:sensitive`, donc
+poller en plus chaque déploiement en cours doublerait le coût sans rien apprendre.
+`GET /deployments/{uuid}` ne sert plus qu'à lire le statut terminal d'un
+déploiement qui vient de quitter la liste — un appel par fin de build.
+
+Résultat : **< 35 req/min** au pire contre les 60 budgétés (annexe B de `PLAN.md`),
+pour N onglets. Ce budget a été dépensé là où il sert : la cadence au repos est
+passée de 15 s à 4 s, parce que **Coolify n'émet aucun webhook au *démarrage* d'un
+déploiement** — les 20 événements sortants couvrent succès, échec, statut, backups,
+tâches et serveurs, jamais le début d'un build. Cette cadence *est* donc la latence
+de détection d'un déploiement lancé depuis l'UI Coolify. Mesuré bout en bout :
+**3,6 s**.
+
+### Webhooks : trois contraintes vérifiées dans le code Coolify
+
+- **Les payloads ne sont pas signés.** `SendWebhookJob` poste le corps, point : pas
+  de HMAC, pas d'horodatage, pas d'identifiant de livraison. L'authentification est
+  donc un secret dans l'URL, comparé en temps constant (SHA-256 des deux côtés, pour
+  que `timingSafeEqual` ne jette pas — et ne fuite pas la longueur — sur une taille
+  différente). Sans `WEBHOOK_SECRET`, la route répond 503 plutôt que d'accepter
+  n'importe qui.
+- **Coolify retente 5 fois** (backoff 10 s) et une retentative est byte-identique à
+  un nouvel événement. Chaque annonce porte donc une clé de déduplication
+  (`deployment-finished:<uuid>`, `server_unreachable:<serveur>`, …) valable 2 min.
+  La même clé sert au poller : la fin d'un déploiement est annoncée **une fois**,
+  par celui des deux qui la voit en premier.
+- **Le coup de pouce de rafraîchissement est hors déduplication.** Une retentative
+  ne doit rien republier du tout : sinon les cinq livraisons coûteraient cinq
+  `/app/overview` par onglet ouvert. La réponse le dit (`accepted: false`).
+
+Coolify refuse par ailleurs les URLs de webhook loopback / lien-local / privées
+(`SafeWebhookUrl`), sauf allowlist de l'opérateur : en local, le polling est le
+seul canal — ce qui est exactement le mode dégradé prévu.
+
+`GET /app/health` rend compte de tout ça :
+
+```json
+"live": { "subscribers": 1, "poller": "active", "webhooks": "ready",
+          "lastWebhookAt": "2026-08-19T09:50:11.276Z" }
+```
+
 ## Fonctionnalités (identiques au mockup)
 
 - Rail avec tooltips retardés 450 ms, instantanés tant que le rail est « warm »
@@ -152,6 +248,7 @@ re-parser, et `Stop` demande une confirmation dans la palette elle-même.
 - Bandeau de trafic edge : sparkline convoyeur, un échantillon / 1200 ms
 - KPIs avec tracé animé des sparklines
 - Déploiement en cours : chrono, ticker de logs en fondu-flou, barre de progression, **hold-to-cancel** (1,4 s)
+  — chrono et logs sont réels depuis la phase 3, le ticker ne boucle plus quand le flux est ouvert
 - Fleet : jauges CPU/MEM/DSK (seuil warn à 80 %) — rails vides en live, faute de source
 - Insights, Applications (toggles auto-deploy), timeline des tâches planifiées
 - Toasts, animations d'entrée en cascade, `prefers-reduced-motion`, breakpoints 1020 / 680 px

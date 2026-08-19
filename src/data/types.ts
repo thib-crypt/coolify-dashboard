@@ -16,15 +16,22 @@ export type {
   Trend,
 } from '@shared/dashboard'
 
-export type { ActionOutcome, ActionResponse } from '@shared/bff'
+export type { ActionOutcome, ActionResponse, LiveEvent, ToastTone } from '@shared/bff'
 
-import type { ActionResponse } from '@shared/bff'
+import type { ActionResponse, LiveEvent } from '@shared/bff'
 import type {
   Dashboard,
   EnvironmentName,
   Server,
   ServerMetrics,
 } from '@shared/dashboard'
+
+/**
+ * What a source pushes. `offline` never crosses the wire: it is the adapter's
+ * own way of saying the transport dropped, so the UI can stop pretending the
+ * numbers on screen are live.
+ */
+export type LiveUpdate = LiveEvent | { type: 'offline' }
 
 /** Everything the UI needs. Implemented twice: mock, and the BFF (`src/data/coolify.ts`). */
 export interface DataSource {
@@ -36,6 +43,12 @@ export interface DataSource {
   sampleTraffic(previous: number): number | null
   /** fresh metrics for one server (fields stay `null` without a metrics source) */
   sampleServer(server: Server): ServerMetrics
+  /**
+   * Server-pushed updates. Returns an unsubscribe function. A source with no
+   * live channel subscribes to nothing and never calls back — the caller then
+   * falls back to polling, which is why this cannot simply be optional.
+   */
+  subscribe(listener: (update: LiveUpdate) => void): () => void
   /* Actions. They resolve with what Coolify actually did — a queued deployment
      and a skipped one both come back as a success, so the caller must look at
      `outcome` rather than assume the click had an effect. */

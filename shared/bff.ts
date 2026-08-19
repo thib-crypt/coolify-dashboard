@@ -1,7 +1,7 @@
 /** Contract between the React SPA and this repo's BFF (`/app/*`).
     The browser never talks to Coolify: it only ever sees these shapes. */
 
-import type { Dashboard } from './dashboard'
+import type { Dashboard, DeploymentState } from './dashboard'
 
 export interface HealthResponse {
   ok: boolean
@@ -16,6 +16,20 @@ export interface HealthResponse {
   }
   /** what the BFF could not read this run — same vocabulary as OverviewResponse */
   notes: DegradedNote[]
+  /** state of the push channel (phase 3) */
+  live: LiveStatus
+}
+
+/** How the BFF is currently learning that something changed. */
+export interface LiveStatus {
+  /** open SSE connections */
+  subscribers: number
+  /** `stopped` while nobody is watching — the poller costs nothing then */
+  poller: 'stopped' | 'idle' | 'active'
+  /** `disabled` until WEBHOOK_SECRET is set; `ready` once the route accepts posts */
+  webhooks: 'disabled' | 'ready'
+  /** when Coolify last posted to `/app/hooks/coolify`, null if never */
+  lastWebhookAt: string | null
 }
 
 /** One thing the dashboard is showing without a real source behind it. */
@@ -83,4 +97,47 @@ export interface BffErrorResponse {
     hint?: string
     retryAfterSeconds?: number
   }
+}
+
+/* ----------------------------------------------------- live channel ------ */
+
+/** Colour of a pushed toast, resolved to a CSS variable by the SPA. */
+export type ToastTone = 'info' | 'ok' | 'warn' | 'err'
+
+/**
+ * What the BFF pushes over `GET /app/events` (SSE, one unnamed `message` event
+ * per item so the SPA needs a single listener).
+ *
+ * Two sources feed this: the adaptive poller and Coolify's outgoing webhooks.
+ * They overlap on purpose — webhooks arrive first when they are configured, the
+ * poller is the floor when they are not — so the hub deduplicates them.
+ */
+export type LiveEvent =
+  /** first frame after connecting; also says what the channel cannot deliver */
+  | { type: 'hello'; at: string; notes: DegradedNote[] }
+  /** something upstream moved: refetch `/app/overview` */
+  | { type: 'overview-changed'; at: string; reason: string }
+  /**
+   * New log lines for a running deployment. `from` is the index of `lines[0]`
+   * in the whole log, which makes a replayed or duplicated frame harmless.
+   */
+  | { type: 'deployment-log'; at: string; deploymentId: string; from: number; lines: string[] }
+  | {
+      type: 'deployment-finished'
+      at: string
+      deploymentId: string
+      app: string
+      /** never `running` — this event is what ends it */
+      state: DeploymentState
+      message: string
+    }
+  /** anything else worth interrupting the user for (server down, backup failed…) */
+  | { type: 'toast'; at: string; message: string; tone: ToastTone }
+
+/** Answer of `POST /app/hooks/coolify`. Coolify ignores it; humans testing don't. */
+export interface WebhookAck {
+  ok: boolean
+  /** false when the payload repeated one already handled (Coolify retries 5×) */
+  accepted: boolean
+  event?: string
 }

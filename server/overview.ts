@@ -52,7 +52,8 @@ export interface OverviewDeps {
 
 export interface OverviewService {
   build(requestedEnv: string | null): Promise<OverviewResponse>
-  health(): Promise<HealthResponse>
+  /** `live` is the route's to add — the aggregator knows nothing of the push channel. */
+  health(): Promise<Omit<HealthResponse, 'live'>>
 }
 
 /** Message worth showing a human, out of whatever went wrong upstream. */
@@ -460,7 +461,7 @@ export function createOverviewService(deps: OverviewDeps): OverviewService {
     return { jobs, taskTargets, backups: scheduled === 0 ? null : { total: executed, failed } }
   }
 
-  async function health(): Promise<HealthResponse> {
+  async function health(): Promise<Omit<HealthResponse, 'live'>> {
     const notes: DegradedNote[] = []
     const version = await optional('version', 'coolify', TTL.version, () => client.version(), null, notes)
     return {

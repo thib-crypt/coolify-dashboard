@@ -1,13 +1,27 @@
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import type { Context } from 'hono'
+import { streamSSE } from 'hono/streaming'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
-import type { ActionResponse, BffErrorCode, BffErrorResponse, HealthResponse } from '../shared/bff'
+import type {
+  ActionResponse,
+  BffErrorCode,
+  BffErrorResponse,
+  DegradedNote,
+  HealthResponse,
+  LiveEvent,
+  LiveStatus,
+  WebhookAck,
+} from '../shared/bff'
+import type * as Api from '../shared/coolify-api'
 import { createActionService, type ActionService } from './actions'
 import { TtlCache } from './cache'
 import { isConfigured, loadConfig, loadEnvFile, missingConfig } from './config'
 import { CoolifyError, createCoolifyClient, type ApplicationAction, type TaskOwner } from './coolify/client'
+import { createEventHub } from './events'
+import { interpretWebhook, secretMatches } from './hooks'
 import { createOverviewService, describeError } from './overview'
+import { createPoller } from './poller'
 import { createStore } from './store'
 
 loadEnvFile()
@@ -32,6 +46,54 @@ const service =
 
 // Same client, so writes share the reads' cache and can invalidate it in place.
 const actions = client ? createActionService({ client, cache }) : null
+
+/* --------------------------------------------------------- live channel ---- */
+
+// The hub starts and stops the poller on the 0 → 1 and 1 → 0 subscriber
+// transitions: with no browser listening there is nothing to push to, and
+// `/app/overview` refreshes its own cache on demand anyway.
+const hub = createEventHub({
+  onActivity: hasSubscribers => {
+    if (!poller) return
+    if (hasSubscribers) poller.start()
+    else poller.stop()
+  },
+})
+
+const poller = client
+  ? createPoller({
+      client,
+      cache,
+      hub,
+      activeMs: config.pollActiveMs,
+      idleMs: config.pollIdleMs,
+    })
+  : null
+
+let lastWebhookAt: string | null = null
+
+const liveStatus = (): LiveStatus => ({
+  subscribers: hub.subscribers,
+  poller: poller?.state ?? 'stopped',
+  webhooks: config.webhookSecret ? 'ready' : 'disabled',
+  lastWebhookAt,
+})
+
+/** What the channel cannot deliver, said once at connection time. */
+function liveNotes(): DegradedNote[] {
+  const notes: DegradedNote[] = []
+  if (!config.webhookSecret) {
+    notes.push({
+      scope: 'webhooks',
+      reason:
+        'WEBHOOK_SECRET is not set, so Coolify cannot push here — updates arrive by polling instead (a few seconds slower).',
+    })
+  }
+  if (!poller) {
+    notes.push({ scope: 'live', reason: notConfigured.error.message })
+  }
+  return notes
+}
 
 /** Upstream failures are the BFF's problem to explain, not the browser's to decode. */
 function toErrorResponse(error: unknown): { status: number; body: BffErrorResponse } {
@@ -109,11 +171,12 @@ app.get('/app/health', async c => {
       now: new Date().toISOString(),
       coolify: { configured: false, url: config.coolifyUrl, version: null },
       notes: [{ scope: 'config', reason: notConfigured.error.message }],
+      live: liveStatus(),
     }
     return c.json(body, 503)
   }
   const health = await service.health()
-  return c.json(health, health.ok ? 200 : 502)
+  return c.json({ ...health, live: liveStatus() }, health.ok ? 200 : 502)
 })
 
 app.get('/app/overview', async c => {
@@ -121,8 +184,10 @@ app.get('/app/overview', async c => {
 
   try {
     const overview = await service.build(c.req.query('env') ?? null)
-    // The SPA polls; let it reuse the payload for as long as the BFF would.
-    c.header('Cache-Control', `private, max-age=${Math.floor(overview.staleAfterMs / 1000)}`)
+    // No browser cache: the SPA refetches *because* a push said the data moved,
+    // and a `max-age` would let it answer that refetch from the stale copy.
+    // Upstream is still protected — the BFF's own TTL cache is the real one.
+    c.header('Cache-Control', 'private, no-store')
     return c.json(overview)
   } catch (error) {
     const { status, body } = toErrorResponse(error)
@@ -130,6 +195,117 @@ app.get('/app/overview', async c => {
     if (body.error.retryAfterSeconds) c.header('Retry-After', String(body.error.retryAfterSeconds))
     return c.json(body, status as 429 | 500 | 502 | 504)
   }
+})
+
+/* --------------------------------------------------------------- live ---- */
+
+/** Comment frame every 25 s: proxies drop an idle stream long before that. */
+const SSE_KEEPALIVE_MS = 25_000
+/**
+ * A browser opens one stream per tab, so this is generous for its purpose and
+ * still bounds an endpoint that holds a socket open and has no auth in front of
+ * it yet (`DASHBOARD_PASSWORD` lands in phase 7).
+ */
+const MAX_SSE_SUBSCRIBERS = 64
+
+app.get('/app/events', c => {
+  if (hub.subscribers >= MAX_SSE_SUBSCRIBERS) {
+    return c.json(
+      {
+        error: {
+          code: 'internal',
+          message: `Too many live connections (${MAX_SSE_SUBSCRIBERS}).`,
+          hint: 'Close some dashboard tabs — the data still loads without the live channel.',
+        },
+      } satisfies BffErrorResponse,
+      503,
+    )
+  }
+
+  return streamSSE(c, async stream => {
+    // Writes are serialised through one chain: `writeSSE` is async, the hub
+    // calls listeners synchronously, and two interleaved frames would corrupt
+    // the stream. Errors are swallowed by `write`, so aborting is what ends it.
+    let queue: Promise<unknown> = Promise.resolve()
+    const send = (event: LiveEvent) => {
+      queue = queue.then(() => stream.writeSSE({ data: JSON.stringify(event) })).catch(() => {})
+    }
+
+    const unsubscribe = hub.subscribe(send)
+    stream.onAbort(unsubscribe)
+    // Backstop: node-server cancels the readable on disconnect, which aborts the
+    // stream, but the request signal fires first on an explicit client abort.
+    c.req.raw.signal.addEventListener('abort', () => stream.abort(), { once: true })
+
+    send({ type: 'hello', at: new Date().toISOString(), notes: liveNotes() })
+
+    while (!stream.aborted && !stream.closed) {
+      await stream.sleep(SSE_KEEPALIVE_MS)
+      if (stream.aborted || stream.closed) break
+      await stream.write(': keepalive\n\n')
+    }
+
+    unsubscribe()
+  })
+})
+
+/**
+ * Coolify's outgoing webhooks land here. The payloads are unsigned, so the
+ * secret travels in the query string — which is why the route refuses to exist
+ * at all until `WEBHOOK_SECRET` is set.
+ *
+ * The answer is always fast and always 2xx on an authenticated payload: a
+ * non-2xx makes `SendWebhookJob` retry the same event up to five times.
+ */
+app.post('/app/hooks/coolify', async c => {
+  if (!config.webhookSecret) {
+    return c.json(
+      {
+        error: {
+          code: 'not_configured',
+          message: 'Incoming webhooks are disabled.',
+          hint: 'Set WEBHOOK_SECRET on the BFF, then point Coolify at /app/hooks/coolify?secret=…',
+        },
+      } satisfies BffErrorResponse,
+      503,
+    )
+  }
+
+  if (!secretMatches(config.webhookSecret, c.req.query('secret'))) {
+    console.warn('[hooks] rejected a payload with a bad or missing secret')
+    return c.json({ error: { code: 'forbidden', message: 'Bad secret.' } } satisfies BffErrorResponse, 403)
+  }
+
+  let payload: Api.CoolifyWebhookPayload
+  try {
+    payload = (await c.req.json()) as Api.CoolifyWebhookPayload
+  } catch {
+    return badRequest(c, 'Expected a JSON body.')
+  }
+
+  const at = new Date().toISOString()
+  lastWebhookAt = at
+  const effect = interpretWebhook(payload, at)
+
+  for (const prefix of effect.invalidate) cache.invalidate(prefix)
+
+  // `publish` returns false when the key was already seen — Coolify retries the
+  // same event up to five times, and a retry must stay invisible. A payload with
+  // nothing dedupable (a silent backup success) is new by definition.
+  let announced = 0
+  for (const { event, key } of effect.events) {
+    if (hub.publish(event, key)) announced++
+  }
+  const accepted = effect.events.length === 0 || announced > 0
+
+  // Only a genuinely new payload is worth a refetch in every open tab.
+  if (accepted) hub.publish(effect.refresh)
+
+  // The deployment queue moved; the poller can confirm it now instead of in 3 s.
+  if (accepted && effect.pokePoller) poller?.poke()
+
+  const ack: WebhookAck = { ok: true, accepted, event: payload.event ?? undefined }
+  return c.json(ack, 202)
 })
 
 /* ------------------------------------------------------------ actions ---- */
@@ -207,9 +383,19 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: '127.0.0.1
       ? `→ Coolify ${config.coolifyUrl} · snapshots: ${store.kind}`
       : `→ not configured (${missingConfig(config).join(', ')}) — /app/overview will answer 503`,
   )
+  if (service) {
+    console.log(
+      `→ live: SSE on /app/events · poll ${config.pollActiveMs / 1000}s active / ${config.pollIdleMs / 1000}s idle · ` +
+        (config.webhookSecret
+          ? 'webhooks ready on /app/hooks/coolify?secret=…'
+          : 'webhooks disabled (set WEBHOOK_SECRET)'),
+    )
+  }
 })
 
 const shutdown = () => {
+  // Before `server.close`: an armed poll timer would keep the loop alive.
+  poller?.stop()
   server.close(() => {
     store.close()
     process.exit(0)

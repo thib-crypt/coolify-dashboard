@@ -160,19 +160,31 @@ Ce que chaque bloc de l'UI consommera réellement. « BFF » = calculé/stocké 
   L'instance est en 4.3.2 → implémenter POST avec fallback GET (détection au premier appel, mémorisée).
 - ✅ *Fini quand* : Deploy, hold-to-cancel et toggle auto-deploy agissent réellement sur l'instance.
 
-### Phase 3 — Temps réel (1–2 jours)
+### Phase 3 — Temps réel (1–2 jours) — **fait**
 - **Polling adaptatif** dans le BFF (c'est ce que fait l'UI Coolify elle-même) : `/deployments`
-  toutes les 3 s si un déploiement est actif, sinon 15 s ; `GET /deployments/{uuid}` pour les logs
-  du déploiement live à 2–3 s. Budget total < 60 req/min (annexe B).
+  toutes les 2,5 s si un déploiement est actif, sinon 4 s. Budget total < 25 req/min (annexe B).
+  Deux écarts au plan initial, tous deux mesurés :
+  - **un seul poller, pas deux.** `/deployments` porte déjà `logs` quand le token a
+    `read:sensitive` (`DeployController::removeSensitiveData`) : poller en plus
+    `GET /deployments/{uuid}` doublerait le coût sans rien apprendre. Cet endpoint ne sert plus
+    qu'à *une* chose, lire le statut terminal d'un déploiement qui vient de quitter la liste.
+  - **4 s au repos, pas 15 s.** Aucun webhook n'annonce le *début* d'un déploiement (la liste des
+    événements sortants n'en contient pas), donc cette cadence *est* la latence de détection d'un
+    déploiement lancé depuis l'UI Coolify. 15 s ratait le critère « < 5 s ». Mesuré : **3,6 s**.
+  - Le poller **s'arrête** quand plus aucun navigateur n'écoute : zéro requête amont au repos.
 - **Webhooks entrants** : `POST /app/hooks/coolify` (secret dans l'URL — les payloads ne sont pas
   signés). Configuration sur l'instance via `PATCH /api/v1/notifications/webhook`. Événements
   utiles : `deployment_success/failed`, `status_changed`, `backup_success/failed`,
   `server_reachable/unreachable`, `high_disk_usage`, `task_success/failed`,
   `container_stopped/restarted` → invalidation de cache immédiate + insight éventuel.
-- **SSE** `GET /app/events` : le front (hook `useLiveDashboard`) reçoit `overview-changed`,
-  `deployment-log`, `toast`. Chrono, ticker de logs et transitions du bouton Deploy passent en réel.
-- ✅ *Fini quand* : un déploiement lancé depuis Coolify apparaît < 5 s dans le dashboard, logs qui
-  défilent, fin de déploiement notifiée par toast sans refresh.
+  Piège vérifié : `SafeWebhookUrl` refuse les cibles loopback/privées côté Coolify — le BFF doit
+  être joignable sur une URL publique, sinon le polling reste le seul canal.
+- **SSE** `GET /app/events` : le front (hook `useLiveDashboard`) reçoit `hello`, `overview-changed`,
+  `deployment-log`, `deployment-finished` et `toast`. Chrono, ticker de logs et transitions du
+  bouton Deploy passent en réel (le bouton reste « Deploying » jusqu'à la *fin du build*, plus
+  seulement jusqu'à la réponse HTTP).
+- ✅ *Fini* : un déploiement lancé depuis Coolify apparaît en 3,6 s, ses logs défilent ligne à ligne,
+  et sa fin arrive en toast sans refresh — vérifié bout en bout contre une instance Coolify simulée.
 
 ### Phase 4 — Uptime & insights (1 jour)
 - `server/probes.ts` : check HTTP des `fqdn` (60 s, opt-in par app) → uptime % réel + latence
@@ -250,15 +262,23 @@ Le README l'annonce : « le rail ne navigue pas — premier vrai ajout à faire.
 
 ## Annexe B — Budget rate-limit (200 req/min)
 
-| Poller | Cadence repos | Cadence active | req/min max |
-|---|---|---|---|
-| `/deployments` (running) | 15 s | 3 s | 20 |
-| `/deployments/{uuid}` (logs live) | — | 2,5 s | 24 |
-| `/applications` | 30 s | 30 s | 2 |
-| `/servers` + sentinel | 60 s | 60 s | 2–4 |
-| Historique déploiements (incrémental) | 5 min | 1 min | ~5 |
-| Tâches planifiées + backups | 5 min | 5 min | ~3 |
-| **Total** | | | **< 60** ✅ |
+Cadences réelles après la phase 3 (la colonne « prévu » est l'estimation d'origine).
+
+| Poller | Cadence repos | Cadence active | req/min max | prévu |
+|---|---|---|---|---|
+| `/deployments` (running **+ logs**) | 4 s | 2,5 s | 24 | 20 |
+| ~~`/deployments/{uuid}` (logs live)~~ | — | — | 0 | 24 |
+| `/deployments/{uuid}` (statut terminal) | — | 1 par fin | ~1 | — |
+| `/applications` | 30 s | 30 s | 2 | 2 |
+| `/servers` | 60 s | 60 s | 2 | 2–4 |
+| Historique déploiements | 2 min | 2 min | ~3 | ~5 |
+| Tâches planifiées + backups | 5 min | 5 min | ~3 | ~3 |
+| **Total** | | | **< 35** ✅ | < 60 |
+
+Le poller ne tourne **que** pendant qu'au moins un navigateur est connecté en SSE ; sans onglet
+ouvert le BFF ne consomme rien. C'est ce qui paye la cadence au repos de 4 s : elle achète la
+détection « < 5 s » d'un déploiement lancé ailleurs, que rien d'autre ne peut fournir (aucun
+webhook n'annonce le début d'un build).
 
 Le BFF sert N onglets/navigateurs avec ce budget constant — c'est l'argument massue contre le
 mode « browser direct » (budget × clients, et headers `X-RateLimit-*` invisibles en CORS).
@@ -274,6 +294,12 @@ mode « browser direct » (budget × clients, et headers `X-RateLimit-*` invisib
 - Réponses : `serializeApiResponse` réordonne les clés — ne jamais dépendre de l'ordre.
 - OpenAPI (`openapi.json` racine du repo) a du **drift** : vérifier contre `routes/api.php`.
 - Webhooks sortants **non signés** → secret dans l'URL + tolérance aux doublons (déduplication
-  par `deployment_uuid` + event).
+  par `deployment_uuid` + event). Confirmé : `SendWebhookJob` retente **5 fois** (backoff 10 s)
+  sans identifiant de livraison — une retentative est byte-identique à un nouvel événement.
+- `SafeWebhookUrl` **refuse** une URL de webhook pointant sur loopback / lien-local / plages
+  privées, sauf allowlist explicite de l'opérateur : le receveur doit être joignable publiquement.
+- **Aucun événement n'annonce le début d'un déploiement** (les 20 événements sortants couvrent
+  succès, échec, statut, backups, tâches, serveurs — pas le démarrage d'un build). Voir un
+  déploiement apparaître ne peut donc venir que du polling.
 - MCP (`/mcp`, Streamable HTTP, même Bearer) : lecture seule, inutile pour le dashboard mais
   pratique pour débugger pendant le dev (déjà branché dans cette session Claude).
