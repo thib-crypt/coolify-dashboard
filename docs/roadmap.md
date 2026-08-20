@@ -195,13 +195,20 @@ Coolify allows 200 req/min **per user**. Measured cadences, against the original
 | Scheduled tasks + backups | 5 min | 5 min | ~3 | ~3 |
 | Probe target list | 5 min | — | ~0.4 | — |
 | Sentinel config per server (opt-in) | 5 min | 5 min | ~0.2 / server | — |
+| Application page: variables + built images | 5 min | 5 min | ~2 per open | — |
+| Runtime logs | never cached | never cached | 1 per open or refresh | — |
 | **Total** | | | **under 36** ✅ | under 60 |
 
-Three things make this hold:
+Four things make this hold:
 
 - **The poller only runs while at least one browser is connected.** With no tab open, the
   only upstream traffic left is the probes' target list — about 0.4 req/min. That is the
   price of an uptime that keeps being measured overnight.
+- **The pages cost requests when opened, never in the background.** Nothing under a route
+  polls: the one live channel lives in the layout, and the per-resource reads share cache
+  families with the aggregator. Clicking through the dashboard a hundred times in five
+  minutes costs what the first click cost. Runtime logs are the deliberate exception — a
+  Refresh button that hands back a cached log would be lying about what it did.
 - **The probes themselves are outside this budget.** They query your applications, not
   Coolify.
 - **The metrics collector is nearly outside it too.** All it reads from Coolify is each
@@ -238,5 +245,8 @@ What each block of the interface actually reads. "BFF" means computed or stored 
 | Fleet · fourth tile | "Capacity —" with no collector, "Avg load" once Sentinel is read |
 | Insights | BFF rule engine over the measured state |
 | Applications | `GET /applications`; uptime from the BFF's probes; auto-deploy from `PATCH /applications/{uuid}` |
+| Application · variables | `GET /applications/{uuid}/envs` — `value` is **absent**, not masked, without `read:sensitive` |
+| Application · runtime logs | `GET /applications/{uuid}/logs?lines`, which answers `400` when the container is stopped |
+| Application · rollback | `GET /applications/{uuid}/rollback-images`, then `POST …/rollback` with the image tag |
 | Schedule | `GET /{applications,services}/{uuid}/scheduled-tasks` + backup frequencies, cron parsed by the BFF |
 | ⌘K palette | Generated from the real resources |
