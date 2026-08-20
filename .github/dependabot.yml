@@ -6,9 +6,12 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
-      # One PR for the noise, individual PRs for anything that ships to users.
+      # Toolchain churn arrives as one PR; anything that ships to users still
+      # gets its own, so a runtime bump is never buried in a batch.
       dev-dependencies:
         dependency-type: development
+      production-dependencies:
+        dependency-type: production
         update-types: [minor, patch]
 
   - package-ecosystem: github-actions
