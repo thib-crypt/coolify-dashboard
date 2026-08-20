@@ -44,7 +44,7 @@
     "test:watch": "node --import tsx --test --watch \"server/**/*.test.ts\""
   },
   "dependencies": {
-    "@hono/node-server": "^1.19.0",
+    "@hono/node-server": "^2.1.1",
     "cron-parser": "^5.10.0",
     "hono": "^4.8.0",
     "react": "^19.1.0",
