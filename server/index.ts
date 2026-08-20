@@ -28,6 +28,7 @@ import { createOverviewService, describeError } from './overview'
 import { createPoller } from './poller'
 import { EMPTY_SNAPSHOT, createProber, httpTargets, tcpTargets } from './probes'
 import { createSignalStore } from './signals'
+import { mountStatic, resolveStaticDir } from './static'
 import { createStore } from './store'
 
 loadEnvFile()
@@ -491,8 +492,20 @@ app.post('/app/:owner{applications|services}/:ownerUuid/tasks/:taskUuid/run', c 
 
 app.all('/app/*', c => c.json({ error: { code: 'internal', message: 'No such endpoint.' } }, 404))
 
-const server = serve({ fetch: app.fetch, port: config.port, hostname: '127.0.0.1' }, info => {
-  console.log(`BFF listening on http://127.0.0.1:${info.port}`)
+/* --------------------------------------------------------------- SPA ---- */
+
+// Last, and only in production: the fallback inside answers every path the API
+// did not claim, so mounting it earlier would hide `/app/*` behind the shell.
+const staticRoot = resolveStaticDir(config.staticDir)
+if (staticRoot) mountStatic(app, staticRoot)
+
+const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, info => {
+  console.log(`BFF listening on http://${config.host}:${info.port}`)
+  console.log(
+    staticRoot
+      ? `→ serving the built dashboard from ${staticRoot}`
+      : '→ API only — run `npm run dev` for the front end, or `npm run build` to serve it from here',
+  )
   console.log(
     service
       ? `→ Coolify ${config.coolifyUrl} · snapshots: ${store.kind}`

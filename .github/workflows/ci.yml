@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22.5 is the floor (node:sqlite); 24 is what the container runs.
+        node: ['22.x', '24.x']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type-check both projects
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build the SPA and the server
+        run: npm run build:web && npm run build:server
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: coolify-dashboard:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Boot it and check it answers
+        run: |
+          docker run -d --name dashboard -p 8787:8787 \
+            -e COOLIFY_URL=https://coolify.invalid \
+            -e COOLIFY_TOKEN=ci \
+            coolify-dashboard:ci
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8787/; then break; fi
+            sleep 1
+          done
+          # The SPA is served, and the API answers with its own shape even
+          # though the Coolify instance in this test does not exist.
+          curl -fsS -o /dev/null http://127.0.0.1:8787/
+          curl -sS http://127.0.0.1:8787/app/health | grep -q coolify-dashboard-bff
+          docker logs dashboard
+          docker rm -f dashboard

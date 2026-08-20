@@ -9,6 +9,8 @@ const config: ConfiguredBffConfig = {
   coolifyUrl: 'https://coolify.test',
   coolifyToken: 'token',
   port: 0,
+  host: '127.0.0.1',
+  staticDir: null,
   dataDir: '.',
   requestTimeoutMs: 1000,
   deploymentHistoryTake: 5,

@@ -1,0 +1,68 @@
+name: Bug report
+description: Something is wrong, or a number on screen does not match reality.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. Empty gauges, missing live updates and permission
+        errors are usually explained in
+        [docs/troubleshooting.md](https://github.com/thib-crypt/coolify-dashboard/blob/main/docs/troubleshooting.md)
+        — worth a look first.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: And what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: health
+    attributes:
+      label: Output of /app/health
+      description: >
+        `curl -s http://127.0.0.1:8787/app/health | jq` — this answers most questions at
+        once. Redact the URL if you prefer.
+      render: json
+    validations:
+      required: false
+
+  - type: input
+    id: coolify
+    attributes:
+      label: Coolify version
+      placeholder: v4.3.2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: how
+    attributes:
+      label: How are you running it?
+      options:
+        - Docker (compose)
+        - Docker (plain)
+        - From source (npm run dev)
+        - From source (npm start)
+        - Mock mode (npm run dev:mock)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Server output, or the browser console. Redact tokens and secrets.
+      render: shell

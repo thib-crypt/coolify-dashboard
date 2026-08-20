@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/thib-crypt/coolify-dashboard/security/advisories/new
+    about: Please report privately rather than in a public issue.
+  - name: Troubleshooting guide
+    url: https://github.com/thib-crypt/coolify-dashboard/blob/main/docs/troubleshooting.md
+    about: Empty gauges, missing live updates and permission errors are covered here.

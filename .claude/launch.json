@@ -18,6 +18,15 @@
         "dev:mock"
       ],
       "port": 5180
+    },
+    {
+      "name": "coolify-dashboard (front end only)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:web"
+      ],
+      "port": 5180
     }
   ]
 }

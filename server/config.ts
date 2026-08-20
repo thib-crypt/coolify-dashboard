@@ -8,6 +8,18 @@ export interface BffConfig {
   coolifyUrl: string | null
   coolifyToken: string | null
   port: number
+  /**
+   * Interface to bind. Loopback by default, because the dashboard has no
+   * authentication of its own yet; a container overrides it to `0.0.0.0` and
+   * puts a proxy in front (see docs/DEPLOYMENT.md).
+   */
+  host: string
+  /**
+   * Built SPA to serve alongside the API, relative to the working directory.
+   * `null` — or a directory with no `index.html` — leaves the BFF API-only,
+   * which is what development wants: Vite serves the front end there.
+   */
+  staticDir: string | null
   /** where the SQLite snapshot file lives */
   dataDir: string
   requestTimeoutMs: number
@@ -102,6 +114,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BffConfig {
     // BFF_PORT wins over PORT: in dev the front-end tooling injects its own PORT
     // into the shared environment, and in production PORT is the usual convention.
     port: Number(env.BFF_PORT ?? env.PORT ?? 8787),
+    host: env.BFF_HOST?.trim() || '127.0.0.1',
+    // Unset means "serve ./dist if it was built"; set-but-empty means "never".
+    staticDir: (env.STATIC_DIR === undefined ? 'dist' : env.STATIC_DIR.trim()) || null,
     dataDir: env.DATA_DIR?.trim() || path.resolve('data'),
     requestTimeoutMs: Number(env.COOLIFY_TIMEOUT_MS ?? 10_000),
     deploymentHistoryTake: Number(env.DEPLOYMENT_HISTORY_TAKE ?? 20),

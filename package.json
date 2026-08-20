@@ -1,8 +1,31 @@
 {
   "name": "coolify-dashboard",
-  "private": true,
   "version": "0.1.0",
+  "private": true,
+  "description": "A real-time companion dashboard for a self-hosted Coolify instance: live fleet, deployments, uptime and one-key actions, behind a BFF that keeps your API token server-side.",
+  "license": "MIT",
+  "author": "thib-crypt",
   "type": "module",
+  "homepage": "https://github.com/thib-crypt/coolify-dashboard#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thib-crypt/coolify-dashboard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/thib-crypt/coolify-dashboard/issues"
+  },
+  "keywords": [
+    "coolify",
+    "dashboard",
+    "devops",
+    "self-hosted",
+    "deployments",
+    "monitoring",
+    "uptime",
+    "hono",
+    "react",
+    "sse"
+  ],
   "engines": {
     "node": ">=22.5"
   },
@@ -11,7 +34,10 @@
     "dev:web": "vite",
     "dev:mock": "VITE_USE_MOCK=1 vite",
     "dev:bff": "BFF_PORT=8787 tsx watch server/index.ts",
-    "build": "tsc --noEmit && vite build",
+    "build": "npm run typecheck && npm run build:web && npm run build:server",
+    "build:web": "vite build",
+    "build:server": "vite build --config vite.server.config.ts",
+    "start": "node dist-server/index.js",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.server.json",
     "test": "node --import tsx --test \"server/**/*.test.ts\"",

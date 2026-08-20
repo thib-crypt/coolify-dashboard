@@ -1,0 +1,51 @@
+# Local: cp .env.example .env, fill COOLIFY_URL and COOLIFY_TOKEN, then
+#   docker compose up -d --build
+# On Coolify itself: point a Docker Compose resource at this repository and set
+# the same variables in its UI — see docs/DEPLOYMENT.md.
+
+services:
+  dashboard:
+    build: .
+    # Prefer a published image over a rebuild once you have one:
+    # image: ghcr.io/thib-crypt/coolify-dashboard:latest
+    restart: unless-stopped
+    ports:
+      # The container has no authentication of its own yet. Publish it on
+      # 127.0.0.1 and put a proxy with auth in front, or keep it on a private
+      # network — see the Security section of the README.
+      - "127.0.0.1:8787:8787"
+    environment:
+      # --- required ---------------------------------------------------------
+      COOLIFY_URL: ${COOLIFY_URL:?set COOLIFY_URL, e.g. https://coolify.example.com}
+      COOLIFY_TOKEN: ${COOLIFY_TOKEN:?set COOLIFY_TOKEN from Security → API Tokens}
+      # --- optional: push channel ------------------------------------------
+      # Set it, then point Coolify's outgoing webhook at
+      # https://<this-host>/app/hooks/coolify?secret=<the same value>
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      # --- optional: measured uptime, latency and TLS expiry ---------------
+      PROBES_ENABLED: ${PROBES_ENABLED:-true}
+      PROBE_APPS: ${PROBE_APPS:-}
+      # --- optional: CPU and RAM gauges (Sentinel over SSH) ----------------
+      # Mount the key below and give its in-container path here.
+      METRICS_SSH_KEY: ${METRICS_SSH_KEY:-}
+      METRICS_SERVERS: ${METRICS_SERVERS:-}
+    volumes:
+      # KPI history and uptime samples. Drop this and both restart from zero.
+      - dashboard-data:/data
+      # Uncomment together with METRICS_SSH_KEY=/keys/id_dashboard:
+      # - ./id_dashboard:/keys/id_dashboard:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8787/app/health').then(r=>r.json()).then(b=>process.exit(b.service?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  dashboard-data:

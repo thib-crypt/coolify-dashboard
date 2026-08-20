@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest something the dashboard should do.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        [docs/roadmap.md](https://github.com/thib-crypt/coolify-dashboard/blob/main/docs/roadmap.md)
+        lists what is already planned — including several things Coolify's API cannot
+        currently support, and why.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to find out or do?
+      description: The problem, rather than the solution — it often has a cheaper answer.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+    validations:
+      required: false
+
+  - type: input
+    id: source
+    attributes:
+      label: Where would the data come from?
+      description: >
+        This dashboard never estimates. If you know the Coolify endpoint, webhook or
+        measurement behind it, name it here — and if there is none, say so, that is useful
+        too.
+    validations:
+      required: false

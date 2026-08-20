@@ -1,10 +1,17 @@
 node_modules
 dist
+dist-server
 .DS_Store
 *.local
 *.tsbuildinfo
+
+# Reference clones of the Coolify source and docs, kept out of the repo.
 upstream/
+
+# Secrets and local state.
 .env
+.env.*
+!.env.example
 /data/
 *.sqlite
 *.sqlite-journal

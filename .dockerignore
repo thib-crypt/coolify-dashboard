@@ -1,0 +1,18 @@
+# Everything the build stage rebuilds itself, plus everything it must never see.
+node_modules
+dist
+dist-server
+data
+upstream
+.git
+.github
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-journal
+*.tsbuildinfo
+.DS_Store
+docs
+*.md
+!README.md
