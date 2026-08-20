@@ -5,7 +5,7 @@
 # Coolify token never leaves this process.
 
 # ---------------------------------------------------------------- build ----
-FROM node:24-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 
 # Dependencies first: this layer is rebuilt only when the lockfile moves.
@@ -18,7 +18,7 @@ COPY . .
 RUN npm run build
 
 # -------------------------------------------------------------- runtime ----
-FROM node:24-alpine AS runtime
+FROM node:26-alpine AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production \
