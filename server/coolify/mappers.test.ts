@@ -6,8 +6,10 @@ import {
   buildKpis,
   buildPaletteActions,
   buildTimeline,
+  createLinks,
   DAY_MS,
   deriveSystemStatus,
+  DOWN_AFTER_FAILURES,
   describeFrequency,
   displayDomain,
   formatDuration,
@@ -26,6 +28,8 @@ import {
   sparkFrom,
   summarizeDeployments,
   type KpiInput,
+  type ProbeHealth,
+  type ServerHealth,
 } from './mappers'
 
 const NOW = Date.parse('2026-08-18T14:32:00Z')
@@ -362,50 +366,230 @@ describe('buildTimeline', () => {
 })
 
 describe('buildInsights', () => {
-  const server = mapServer({ uuid: 's1', name: 'localhost', ip: '10.0.0.1', is_reachable: true })
-  const healthy = { uuid: 'a1', name: 'api', status: parseResourceStatus('running:healthy') }
+  const links = createLinks('https://coolify.test', new Map([[7, { projectUuid: 'p1', environmentUuid: 'e1' }]]))
+  const healthyServer: ServerHealth = {
+    server: mapServer({ uuid: 's1', name: 'localhost', ip: '10.0.0.1', is_reachable: true }),
+    diskAlert: false,
+    diskPct: null,
+    unreachableCount: 0,
+    metricsExpected: false,
+  }
+  const healthy = { uuid: 'a1', name: 'api', status: parseResourceStatus('running:healthy'), environmentId: 7 }
+
+  const base = {
+    servers: [healthyServer],
+    applications: [healthy],
+    probes: [],
+    recentFailures: [],
+    backupFailures: [],
+    links,
+    now: NOW,
+  }
+
+  const probe = (over: Partial<ProbeHealth> = {}): ProbeHealth => ({
+    uuid: 'a1',
+    name: 'api',
+    host: 'api.test',
+    environmentId: 7,
+    up: true,
+    consecutiveFailures: 0,
+    uptimePct: 100,
+    samples: 1440,
+    tls: null,
+    ...over,
+  })
 
   it('reports an all-clear rather than an empty column', () => {
-    const insights = buildInsights({ servers: [server], applications: [healthy], recentFailures: [], now: NOW })
+    const insights = buildInsights(base)
     assert.equal(insights.length, 1)
     assert.equal(insights[0]?.severity, 'ok')
   })
 
   it('raises unreachable servers first', () => {
     const insights = buildInsights({
-      servers: [{ ...server, reachable: false }],
-      applications: [{ uuid: 'a1', name: 'api', status: parseResourceStatus('exited:unhealthy') }],
-      recentFailures: [],
-      now: NOW,
+      ...base,
+      servers: [{ ...healthyServer, server: { ...healthyServer.server, reachable: false }, unreachableCount: 4 }],
+      applications: [{ ...healthy, status: parseResourceStatus('exited:unhealthy') }],
     })
     assert.equal(insights[0]?.severity, 'err')
     assert.match(insights[0]?.title ?? '', /unreachable/)
+    assert.match(insights[0]?.description ?? '', /4 times/)
+    assert.equal(insights[0]?.href, 'https://coolify.test/server/s1')
   })
 
   it('groups repeated failures of one app into a single insight', () => {
     const insights = buildInsights({
-      servers: [server],
-      applications: [healthy],
+      ...base,
       recentFailures: [
         { app: 'api', at: NOW - 60_000 },
         { app: 'api', at: NOW - 120_000 },
         { app: 'api', at: NOW - 180_000 },
       ],
-      now: NOW,
     })
     assert.equal(insights.length, 1)
     assert.match(insights[0]?.title ?? '', /3 failed deployments on api/)
+    assert.equal(
+      insights[0]?.href,
+      'https://coolify.test/project/p1/environment/e1/application/a1/deployment',
+    )
   })
 
   it('distinguishes a running-but-unhealthy app from a stopped one', () => {
     const insights = buildInsights({
-      servers: [server],
-      applications: [{ uuid: 'a1', name: 'api', status: parseResourceStatus('running:unhealthy') }],
-      recentFailures: [],
-      now: NOW,
+      ...base,
+      applications: [{ ...healthy, status: parseResourceStatus('running:unhealthy') }],
     })
     assert.equal(insights[0]?.severity, 'warn')
     assert.match(insights[0]?.title ?? '', /unhealthy/)
+  })
+
+  it('calls an application down only once the probe has failed enough times', () => {
+    const twice = buildInsights({ ...base, probes: [probe({ up: false, consecutiveFailures: 2 })] })
+    assert.equal(twice[0]?.severity, 'ok')
+
+    const enough = buildInsights({
+      ...base,
+      probes: [probe({ up: false, consecutiveFailures: DOWN_AFTER_FAILURES })],
+    })
+    assert.match(enough[0]?.title ?? '', /api is not answering/)
+    assert.equal(enough[0]?.href, 'https://coolify.test/project/p1/environment/e1/application/a1')
+  })
+
+  it('stays silent about a probe failing on an app Coolify already reports as stopped', () => {
+    const insights = buildInsights({
+      ...base,
+      applications: [{ ...healthy, status: parseResourceStatus('exited:unhealthy') }],
+      probes: [probe({ up: false, consecutiveFailures: 9 })],
+    })
+    assert.equal(insights.length, 1)
+    assert.match(insights[0]?.title ?? '', /api is exited/)
+  })
+
+  it('warns before a certificate expires and escalates once it has', () => {
+    const soon = buildInsights({
+      ...base,
+      probes: [probe({ tls: { daysLeft: 9, trusted: true, error: null } })],
+    })
+    assert.equal(soon[0]?.severity, 'warn')
+    assert.match(soon[0]?.title ?? '', /expires in 9 d/)
+    assert.equal(soon[0]?.href, 'https://coolify.test/project/p1/environment/e1/application/a1/domains')
+
+    const expired = buildInsights({
+      ...base,
+      probes: [probe({ tls: { daysLeft: -2, trusted: false, error: null } })],
+    })
+    assert.equal(expired[0]?.severity, 'err')
+    assert.match(expired[0]?.description ?? '', /expired 2 d ago/)
+  })
+
+  it('ignores a healthy certificate', () => {
+    const insights = buildInsights({
+      ...base,
+      probes: [probe({ tls: { daysLeft: 60, trusted: true, error: null } })],
+    })
+    assert.equal(insights[0]?.severity, 'ok')
+  })
+
+  it('reports a failed backup with a link to its database', () => {
+    const insights = buildInsights({
+      ...base,
+      backupFailures: [{ database: 'postgres', databaseUuid: 'db1', environmentId: 7, at: NOW - 3_600_000 }],
+    })
+    assert.equal(insights[0]?.severity, 'err')
+    assert.match(insights[0]?.title ?? '', /Backup of postgres failed/)
+    assert.equal(insights[0]?.href, 'https://coolify.test/project/p1/environment/e1/database/db1/backups')
+  })
+
+  it('turns a disk alert into an insight, with the webhook figure when it has one', () => {
+    const known = buildInsights({ ...base, servers: [{ ...healthyServer, diskAlert: true, diskPct: 93 }] })
+    assert.equal(known[0]?.severity, 'err')
+    assert.match(known[0]?.title ?? '', /disk at 93 %/)
+
+    const unknown = buildInsights({ ...base, servers: [{ ...healthyServer, diskAlert: true }] })
+    assert.equal(unknown[0]?.severity, 'warn')
+    assert.match(unknown[0]?.title ?? '', /low on disk space/)
+  })
+
+  it('flags degraded uptime only for an application that is currently up', () => {
+    const degraded = buildInsights({ ...base, probes: [probe({ uptimePct: 98.2, samples: 900 })] })
+    assert.equal(degraded[0]?.severity, 'warn')
+    assert.match(degraded[0]?.title ?? '', /98.20 %/)
+
+    // Down right now: the outage is the insight, not the average it produced.
+    const down = buildInsights({
+      ...base,
+      probes: [probe({ uptimePct: 98.2, up: false, consecutiveFailures: 5 })],
+    })
+    assert.equal(down.length, 1)
+    assert.match(down[0]?.title ?? '', /not answering/)
+  })
+
+  it('says nothing about uptime before there are enough samples', () => {
+    const insights = buildInsights({ ...base, probes: [probe({ uptimePct: null, samples: 2 })] })
+    assert.equal(insights[0]?.severity, 'ok')
+  })
+
+  it('stays quiet about metrics nobody asked this dashboard to collect', () => {
+    // A default install has no SSH key, so every CPU gauge is empty by design.
+    // Turning that into an alert would make the panel cry wolf on every screen.
+    const insights = buildInsights({ ...base, servers: [{ ...healthyServer, metricsExpected: false }] })
+    assert.equal(insights[0]?.severity, 'ok')
+  })
+
+  it('reports metrics the operator configured and is not getting', () => {
+    const server = mapServer(
+      { uuid: 's1', name: 'localhost', is_reachable: true },
+      { source: 'sentinel-off', note: 'Sentinel metrics are disabled on this server.' },
+    )
+    const insights = buildInsights({
+      ...base,
+      servers: [{ ...healthyServer, server, metricsExpected: true }],
+    })
+    assert.equal(insights[0]?.severity, 'warn')
+    assert.equal(insights[0]?.title, 'Sentinel metrics are off on localhost')
+    assert.equal(insights[0]?.href, 'https://coolify.test/server/s1')
+  })
+
+  it('leaves an unreachable server one insight, not two', () => {
+    // "Cannot SSH in" already says why the gauges are empty.
+    const server = mapServer(
+      { uuid: 's1', name: 'localhost', is_reachable: false },
+      { source: 'error', note: 'Coolify cannot reach this server.' },
+    )
+    const insights = buildInsights({
+      ...base,
+      servers: [{ ...healthyServer, server, metricsExpected: true }],
+    })
+    assert.equal(insights.length, 1)
+    assert.equal(insights[0]?.severity, 'err')
+    assert.match(insights[0]?.title ?? '', /unreachable/)
+  })
+
+  it('sorts errors above warnings and counts what it had to hide', () => {
+    const insights = buildInsights({
+      ...base,
+      applications: [
+        { uuid: 'a1', name: 'api', status: parseResourceStatus('running:unhealthy'), environmentId: 7 },
+        { uuid: 'a2', name: 'web', status: parseResourceStatus('exited:unhealthy'), environmentId: 7 },
+      ],
+      servers: [
+        { ...healthyServer, server: { ...healthyServer.server, reachable: false } },
+        { ...healthyServer, diskAlert: true, diskPct: 95 },
+      ],
+      backupFailures: [{ database: 'pg', databaseUuid: 'db1', environmentId: 7, at: NOW }],
+      recentFailures: [{ app: 'api', at: NOW }],
+    })
+
+    // Six rules fired: four errors, then the unhealthy app and its failed
+    // deployment. The last slot is the count of what did not fit, and it wears
+    // the severity of the worst thing it is hiding.
+    assert.equal(insights.length, 5)
+    assert.deepEqual(
+      insights.map(insight => insight.severity),
+      ['err', 'err', 'err', 'err', 'warn'],
+    )
+    assert.equal(insights.at(-1)?.id, 'more-insights')
+    assert.match(insights.at(-1)?.title ?? '', /2 more issues need attention/)
   })
 })
 
@@ -440,9 +624,43 @@ describe('mapServer', () => {
 
   it('leaves metrics and ping null — Coolify exposes neither over REST', () => {
     const server = mapServer({ uuid: 's', name: 'n', ip: '10.0.0.1' })
-    assert.deepEqual(server.metrics, { cpu: null, mem: null, dsk: null })
+    assert.equal(server.metrics.cpu, null)
+    assert.equal(server.metrics.mem, null)
+    assert.equal(server.metrics.dsk, null)
     assert.equal(server.pingMs, null)
     assert.equal(server.region, '10.0.0.1')
+  })
+
+  it('says which silence an empty gauge is, rather than only that it is empty', () => {
+    const server = mapServer({ uuid: 's', name: 'n' })
+    assert.equal(server.metrics.source, 'off')
+    assert.match(server.metrics.note, /metrics source/i)
+  })
+
+  it('shows Sentinel percentages only when they were actually measured', () => {
+    const measured = mapServer(
+      { uuid: 's', name: 'n' },
+      { cpu: 41.2, mem: 68, source: 'sentinel', note: 'Measured by Sentinel on n, 3 s ago.' },
+    )
+    assert.equal(measured.metrics.cpu, 41.2)
+    assert.equal(measured.metrics.mem, 68)
+
+    // A stale reading keeps its numbers out of the UI: an old percentage shown
+    // as current is exactly the kind of plausible lie the panel must not tell.
+    const stale = mapServer({ uuid: 's', name: 'n' }, { cpu: 41.2, mem: 68, source: 'stale', note: 'too old' })
+    assert.equal(stale.metrics.cpu, null)
+    assert.equal(stale.metrics.mem, null)
+    assert.equal(stale.metrics.note, 'too old')
+  })
+
+  it('keeps disk tied to the alert that carried the figure', () => {
+    const alerting = mapServer(
+      { uuid: 's', name: 'n', high_disk_usage_notification_sent: true },
+      { diskPct: 93 },
+    )
+    assert.equal(alerting.metrics.dsk, 93)
+    // No alert standing: the last known percentage is not a current one.
+    assert.equal(mapServer({ uuid: 's', name: 'n' }, { diskPct: 93 }).metrics.dsk, null)
   })
 })
 

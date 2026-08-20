@@ -85,6 +85,21 @@ describe('interpretWebhook', () => {
     assert.match(toast?.type === 'toast' ? toast.message : '', /91 %/)
   })
 
+  it('keeps the disk figure as a signal, since no REST endpoint carries it', () => {
+    const effect = interpretWebhook(
+      { event: 'high_disk_usage', server_name: 'edge-1', disk_usage: 91, threshold: 80 },
+      AT,
+    )
+    assert.deepEqual(effect.signals, [
+      { kind: 'disk_usage', subject: 'edge-1', value: 91, at: Date.parse(AT) },
+    ])
+  })
+
+  it('records no signal when the payload carries no figure', () => {
+    const effect = interpretWebhook({ event: 'high_disk_usage', server_name: 'edge-1' }, AT)
+    assert.deepEqual(effect.signals, [])
+  })
+
   it('stays silent on a successful backup but still refreshes', () => {
     const effect = interpretWebhook({ event: 'backup_success', database_name: 'postgres' }, AT)
     assert.equal(toastOf(effect), undefined)

@@ -3,7 +3,7 @@ import { DashboardError, source, type Dashboard, type EnvironmentName, type Live
 import { useToast } from './useToasts'
 
 /**
- * Owns the dashboard payload and the live channel (phase 3 of PLAN.md).
+ * Owns the dashboard payload and the live channel (phase 3 of docs/roadmap.md).
  *
  * The BFF pushes over SSE, but the dashboard must not *depend* on that: a proxy
  * that buffers `text/event-stream`, a corporate filter, a sleeping laptop — all

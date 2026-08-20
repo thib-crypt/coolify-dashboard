@@ -1,5 +1,5 @@
 /**
- * Write side of the BFF (phase 2 of PLAN.md).
+ * Write side of the BFF (phase 2 of docs/roadmap.md).
  *
  * Two things make this more than a passthrough:
  *

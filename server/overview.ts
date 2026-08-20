@@ -3,7 +3,7 @@
  *
  * Every upstream family goes through the TTL cache, so the number of requests
  * the BFF makes is a function of *time*, not of how many browsers are watching
- * (annexe B of PLAN.md). A family that fails degrades into a `DegradedNote`
+ * (appendix B of docs/roadmap.md). A family that fails degrades into a `DegradedNote`
  * rather than taking the whole dashboard down — except applications and
  * servers, without which there is no dashboard to show.
  */
@@ -12,15 +12,21 @@ import type { DegradedNote, HealthResponse, OverviewResponse } from '../shared/b
 import type { Dashboard } from '../shared/dashboard'
 import type * as Api from '../shared/coolify-api'
 import { TTL, type TtlCache } from './cache'
+import { mapLimit } from './concurrency'
 import type { KpiSample, SnapshotStore } from './store'
 import { CoolifyError, type CoolifyClient } from './coolify/client'
+import { EMPTY_METRICS, degradedMetrics, type MetricsSnapshot } from './metrics'
+import { EMPTY_SNAPSHOT, MIN_UPTIME_SAMPLES, formatUptime, type ProbeSnapshot } from './probes'
+import type { SignalStore } from './signals'
 import {
   DAY_MS,
+  DOWN_AFTER_FAILURES,
   buildFleetTotals,
   buildInsights,
   buildKpis,
   buildPaletteActions,
   buildTimeline,
+  createLinks,
   deriveSystemStatus,
   describeFrequency,
   mapApplication,
@@ -31,6 +37,10 @@ import {
   parseApiDate,
   parseResourceStatus,
   summarizeDeployments,
+  type BackupFailure,
+  type ProbeHealth,
+  type ResourceLocation,
+  type ServerHealth,
   type TaskTarget,
   type TimelineJob,
 } from './coolify/mappers'
@@ -47,13 +57,19 @@ export interface OverviewDeps {
   store: SnapshotStore
   historyTake: number
   coolifyUrl: string
+  /** current state of the outbound probes; omitted when probing is off */
+  probes?: () => ProbeSnapshot
+  /** current state of the Sentinel collector; omitted when it is not configured */
+  metrics?: () => MetricsSnapshot
+  /** readings only webhooks carry (disk usage) */
+  signals?: SignalStore
   now?: () => number
 }
 
 export interface OverviewService {
   build(requestedEnv: string | null): Promise<OverviewResponse>
-  /** `live` is the route's to add — the aggregator knows nothing of the push channel. */
-  health(): Promise<Omit<HealthResponse, 'live'>>
+  /** `live`, `probes` and `metrics` are the route's to add — the aggregator owns none. */
+  health(): Promise<Omit<HealthResponse, 'live' | 'probes' | 'metrics'>>
 }
 
 /** Message worth showing a human, out of whatever went wrong upstream. */
@@ -84,24 +100,13 @@ export function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const results: R[] = new Array(items.length)
-  let cursor = 0
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (cursor < items.length) {
-      const index = cursor++
-      results[index] = await fn(items[index] as T)
-    }
-  })
-  await Promise.all(workers)
-  return results
-}
-
 const nonNull = <T>(value: T | null | undefined): value is T => value != null
 
 export function createOverviewService(deps: OverviewDeps): OverviewService {
   const { client, cache, store, historyTake } = deps
   const clock = deps.now ?? Date.now
+  const probeState = deps.probes ?? (() => EMPTY_SNAPSHOT)
+  const metricsState = deps.metrics ?? (() => EMPTY_METRICS)
 
   /** Cached read that degrades to `fallback` and records why. */
   async function optional<T>(
@@ -152,9 +157,17 @@ export function createOverviewService(deps: OverviewDeps): OverviewService {
       ),
     )
     const environmentNameById = new Map<number, string>()
-    for (const list of environmentLists) {
-      for (const environment of list) environmentNameById.set(environment.id, environment.name)
-    }
+    // Same loop feeds the deep links: a Coolify resource URL needs the project
+    // uuid *and* the environment uuid, and this is the only place both are known.
+    const locationByEnvironmentId = new Map<number, ResourceLocation>()
+    environmentLists.forEach((list, index) => {
+      const projectUuid = projects[index]?.uuid
+      for (const environment of list) {
+        environmentNameById.set(environment.id, environment.name)
+        if (projectUuid) locationByEnvironmentId.set(environment.id, { projectUuid, environmentUuid: environment.uuid })
+      }
+    })
+    const links = createLinks(deps.coolifyUrl, locationByEnvironmentId)
 
     const canFilterByEnvironment = environmentNameById.size > 0
     if (!canFilterByEnvironment) {
@@ -192,8 +205,15 @@ export function createOverviewService(deps: OverviewDeps): OverviewService {
       })
     }
 
+    /* --- what the BFF measured itself, from outside Coolify (phase 4) ---- */
+    const probes = probeState()
+    const uptimeOf = (uuid: string): string | null => {
+      const probe = probes.applications.get(uuid)
+      return probe?.uptimePct == null ? null : formatUptime(probe.uptimePct)
+    }
+
     const mappedApplications = envApplications.map((app, index) =>
-      mapApplication(app, details[index]?.settings?.is_auto_deploy_enabled ?? null),
+      mapApplication(app, details[index]?.settings?.is_auto_deploy_enabled ?? null, uptimeOf(app.uuid)),
     )
 
     /* --- deployments: `/deployments` is live-only, history is per application --- */
@@ -258,7 +278,7 @@ export function createOverviewService(deps: OverviewDeps): OverviewService {
     ]
 
     /* --- schedule: scheduled tasks + database backups, placed by cron --- */
-    const { jobs, taskTargets, backups } = await collectSchedule({
+    const { jobs, taskTargets, backups, backupFailures } = await collectSchedule({
       applications: envApplications,
       inEnvironment,
       now,
@@ -283,7 +303,61 @@ export function createOverviewService(deps: OverviewDeps): OverviewService {
       backups: snapshots.map(row => row.backups24h).filter(nonNull),
     }
 
-    const mappedServers = servers.map(mapServer)
+    /* --- CPU and RAM: Sentinel over SSH, or an explained em dash (phase 5) --- */
+    const metrics = metricsState()
+    const readingFor = (server: Api.Server) => {
+      const reading = metrics.servers.get(server.uuid)
+      if (reading) return { cpu: reading.cpu, mem: reading.mem, source: reading.source, note: reading.note }
+      // No reading at all: either nothing collects them here, or the collector
+      // has not reached this server yet. Both deserve their own sentence.
+      return degradedMetrics({
+        collector: metrics.enabled,
+        metricsEnabled: server.settings?.is_metrics_enabled === true,
+        reachable: server.is_reachable ?? server.settings?.is_reachable ?? false,
+      })
+    }
+
+    const mappedServers = servers.map(server =>
+      mapServer(server, {
+        pingMs: probes.servers.get(server.uuid)?.latencyMs ?? null,
+        diskPct: deps.signals?.latest('disk_usage', server.name, now)?.value ?? null,
+        ...readingFor(server),
+      }),
+    )
+
+    const serverHealth: ServerHealth[] = servers.map((server, index) => ({
+      server: mappedServers[index] as (typeof mappedServers)[number],
+      diskAlert: server.high_disk_usage_notification_sent === true,
+      diskPct: deps.signals?.latest('disk_usage', server.name, now)?.value ?? null,
+      unreachableCount: server.unreachable_count ?? 0,
+      metricsExpected: metrics.enabled,
+    }))
+
+    // Probes are keyed by application uuid and know nothing of environments;
+    // the filter here is what keeps an insight about staging out of production.
+    const probeHealth: ProbeHealth[] = envApplications
+      .map(app => {
+        const probe = probes.applications.get(app.uuid)
+        if (!probe) return null
+        return {
+          uuid: app.uuid,
+          name: app.name,
+          host: probe.host,
+          ...(app.environment_id === undefined ? {} : { environmentId: app.environment_id }),
+          up: probe.up,
+          consecutiveFailures: probe.consecutiveFailures,
+          uptimePct: probe.uptimePct,
+          samples: probe.samples,
+          tls: probe.tls
+            ? { daysLeft: probe.tls.daysLeft, trusted: probe.tls.trusted, error: probe.tls.error }
+            : null,
+        } satisfies ProbeHealth
+      })
+      .filter(nonNull)
+
+    const downApplications = probeHealth
+      .filter(probe => probe.consecutiveFailures >= DOWN_AFTER_FAILURES)
+      .map(probe => probe.name)
 
     const dashboard: Dashboard = {
       org: team?.name ?? 'Coolify',
@@ -292,6 +366,7 @@ export function createOverviewService(deps: OverviewDeps): OverviewService {
       systemStatus: deriveSystemStatus(
         mappedServers,
         failures.filter(entry => now - entry.at <= HOUR_MS).length,
+        downApplications,
       ),
       kpis: buildKpis({
         applicationCount: envApplications.length,
@@ -306,13 +381,17 @@ export function createOverviewService(deps: OverviewDeps): OverviewService {
       servers: mappedServers,
       fleetTotals: buildFleetTotals(mappedServers, envApplications.length),
       insights: buildInsights({
-        servers: mappedServers,
+        servers: serverHealth,
         applications: envApplications.map(app => ({
           uuid: app.uuid,
           name: app.name,
           status: parseResourceStatus(app.status),
+          ...(app.environment_id === undefined ? {} : { environmentId: app.environment_id }),
         })),
+        probes: probeHealth,
         recentFailures: failures.map(entry => ({ app: entry.app.name, at: entry.at })),
+        backupFailures,
+        links,
         now,
       }),
       applications: mappedApplications,
@@ -325,7 +404,12 @@ export function createOverviewService(deps: OverviewDeps): OverviewService {
       generatedAt: new Date(now).toISOString(),
       staleAfterMs: TTL.deployments,
       dashboard,
-      notes: [...notes, ...STRUCTURAL_NOTES],
+      notes: [
+        ...notes,
+        ...probeNotes(probes, envApplications.length),
+        ...metricsNotes(metrics, mappedServers.length),
+        ...STRUCTURAL_NOTES,
+      ],
     }
   }
 
@@ -340,6 +424,8 @@ export function createOverviewService(deps: OverviewDeps): OverviewService {
     /** enabled tasks the palette can run on demand */
     taskTargets: TaskTarget[]
     backups: { total: number; failed: number } | null
+    /** newest failed execution per database, last 24 h — one insight each */
+    backupFailures: BackupFailure[]
   }> {
     const { applications, inEnvironment, now, notes } = input
     const jobs: TimelineJob[] = []
@@ -434,6 +520,7 @@ export function createOverviewService(deps: OverviewDeps): OverviewService {
     let scheduled = 0
     let executed = 0
     let failed = 0
+    const failureByDatabase = new Map<string, BackupFailure>()
 
     for (const { database, configs } of backupConfigs) {
       for (const config of configs) {
@@ -453,15 +540,31 @@ export function createOverviewService(deps: OverviewDeps): OverviewService {
           const at = parseApiDate(execution.finished_at) ?? parseApiDate(execution.created_at)
           if (at === null || now - at > DAY_MS) continue
           executed++
-          if ((execution.status ?? '').toLowerCase().startsWith('fail')) failed++
+          if (!(execution.status ?? '').toLowerCase().startsWith('fail')) continue
+          failed++
+          // Five failed runs of the same nightly backup is one broken backup.
+          const previous = failureByDatabase.get(database.uuid)
+          if (!previous || at > previous.at) {
+            failureByDatabase.set(database.uuid, {
+              database: database.name,
+              databaseUuid: database.uuid,
+              ...(database.environment_id === undefined ? {} : { environmentId: database.environment_id }),
+              at,
+            })
+          }
         }
       }
     }
 
-    return { jobs, taskTargets, backups: scheduled === 0 ? null : { total: executed, failed } }
+    return {
+      jobs,
+      taskTargets,
+      backups: scheduled === 0 ? null : { total: executed, failed },
+      backupFailures: [...failureByDatabase.values()].sort((a, b) => b.at - a.at),
+    }
   }
 
-  async function health(): Promise<Omit<HealthResponse, 'live'>> {
+  async function health(): Promise<Omit<HealthResponse, 'live' | 'probes' | 'metrics'>> {
     const notes: DegradedNote[] = []
     const version = await optional('version', 'coolify', TTL.version, () => client.version(), null, notes)
     return {
@@ -476,15 +579,82 @@ export function createOverviewService(deps: OverviewDeps): OverviewService {
   return { build, health }
 }
 
-/** Gaps that are structural in phase 1, not transient failures. */
+/** Gaps that are structural, not transient failures. */
 const STRUCTURAL_NOTES: DegradedNote[] = [
-  {
-    scope: 'metrics',
-    reason: 'Coolify has no REST endpoint for CPU/RAM/disk — those come from Sentinel over SSH (PLAN.md phase 5).',
-  },
-  { scope: 'uptime', reason: 'Coolify tracks no uptime; HTTP probes land in phase 4.' },
-  { scope: 'traffic', reason: 'No edge traffic metrics in Coolify core (PLAN.md phase 7).' },
+  { scope: 'traffic', reason: 'No edge traffic metrics in Coolify core — Traefik metrics are on the roadmap.' },
 ]
+
+/**
+ * What the CPU and memory gauges are not saying, and why.
+ *
+ * The first branch is the one almost every install sees: Coolify has no REST
+ * endpoint for either figure, so without an SSH key the dashboard has no way to
+ * read them. That is worth stating plainly rather than leaving three empty bars
+ * to be read as "idle".
+ */
+export function metricsNotes(metrics: MetricsSnapshot, serverCount: number): DegradedNote[] {
+  if (!metrics.enabled) {
+    return [
+      {
+        scope: 'metrics',
+        reason:
+          'Coolify has no REST endpoint for CPU or RAM — its own charts read them from the Sentinel agent over SSH. Set METRICS_SSH_KEY to let this dashboard do the same.',
+      },
+    ]
+  }
+
+  if (serverCount === 0) return []
+
+  const readings = [...metrics.servers.values()]
+  const silent = readings.filter(reading => reading.source !== 'sentinel')
+  // Nothing collected yet at all: the first cycle has not landed.
+  if (readings.length === 0) {
+    return [{ scope: 'metrics', reason: 'The Sentinel collector has not completed its first cycle yet.' }]
+  }
+  if (silent.length === 0) return []
+
+  return [
+    {
+      scope: 'metrics',
+      reason:
+        silent.length === 1 && silent[0]
+          ? silent[0].note
+          : `${silent.length} of ${readings.length} servers are not reporting metrics — hover their gauges for the reason.`,
+    },
+  ]
+}
+
+/**
+ * What the uptime column is not saying, and why. Three different silences —
+ * probing turned off, nothing to probe, not enough samples yet — that would
+ * otherwise all look like the same em dash.
+ */
+export function probeNotes(probes: ProbeSnapshot, applicationCount: number): DegradedNote[] {
+  if (!probes.enabled) {
+    return [
+      {
+        scope: 'uptime',
+        reason:
+          'HTTP probes are off (PROBES_ENABLED=false), so uptime, latency and certificate expiry are not measured. Coolify itself tracks none of them.',
+      },
+    ]
+  }
+
+  if (probes.applications.size === 0) {
+    return applicationCount === 0
+      ? []
+      : [{ scope: 'uptime', reason: 'No application in this environment has a public domain to probe.' }]
+  }
+
+  const warming = [...probes.applications.values()].filter(probe => probe.samples < MIN_UPTIME_SAMPLES)
+  if (warming.length === 0) return []
+  return [
+    {
+      scope: 'uptime',
+      reason: `Still measuring ${warming.length} application(s) — a percentage needs at least ${MIN_UPTIME_SAMPLES} probes behind it.`,
+    },
+  ]
+}
 
 /** Prefers the requested environment, then the busiest one — usually production. */
 export function pickEnvironment(

@@ -27,6 +27,26 @@ export interface SnapshotStore {
   close(): void
 }
 
+/** One HTTP probe result. Coolify tracks no uptime, so the only honest source
+    for a percentage is a table of measurements this BFF took itself. */
+export interface ProbeStats {
+  samples: number
+  up: number
+  /** 0–100 over the requested window; 0 when there is no sample */
+  uptimePct: number
+  avgLatencyMs: number | null
+}
+
+export interface ProbeStore {
+  recordProbe(target: string, at: number, ok: boolean, latencyMs: number | null): void
+  probeStats(target: string, since: number): ProbeStats
+  /** Drops samples older than `before` — called hourly by the prober. */
+  pruneProbes(before: number): void
+}
+
+/** What `createStore` hands back: both histories live in the same file. */
+export type Store = SnapshotStore & ProbeStore
+
 export const SNAPSHOT_INTERVAL_MS = 60 * 60_000
 
 const COLUMNS = 'taken_at, applications, deployments_24h, deploy_success_pct, median_deploy_ms, backups_24h'
@@ -42,7 +62,17 @@ const SCHEMA = `
     backups_24h INTEGER,
     PRIMARY KEY (env, taken_at)
   );
+
+  CREATE TABLE IF NOT EXISTS probe_sample (
+    target TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    ok INTEGER NOT NULL,
+    latency_ms INTEGER,
+    PRIMARY KEY (target, at)
+  );
 `
+
+const EMPTY_STATS: ProbeStats = { samples: 0, up: 0, uptimePct: 0, avgLatencyMs: null }
 
 type Row = Record<string, unknown>
 
@@ -58,7 +88,7 @@ const toRow = (r: Row): SnapshotRow => ({
 /** Falls back to an in-process ring buffer when `node:sqlite` is unavailable
     (Node < 22.5, or built without SQLite): the dashboard then loses its
     history across restarts but never fails to render. */
-export async function createStore(dataDir: string): Promise<SnapshotStore> {
+export async function createStore(dataDir: string): Promise<Store> {
   try {
     const { DatabaseSync } = await import('node:sqlite')
     fs.mkdirSync(dataDir, { recursive: true })
@@ -75,6 +105,19 @@ export async function createStore(dataDir: string): Promise<SnapshotStore> {
     const atOrBefore = db.prepare(
       `SELECT ${COLUMNS} FROM kpi_snapshot WHERE env = ? AND taken_at <= ? ORDER BY taken_at DESC LIMIT 1`,
     )
+
+    const insertProbe = db.prepare(
+      'INSERT OR REPLACE INTO probe_sample (target, at, ok, latency_ms) VALUES (?, ?, ?, ?)',
+    )
+    // AVG over successful samples only: a timeout has no latency to average in,
+    // and counting it as zero would make an outage look fast.
+    const statsFor = db.prepare(
+      `SELECT COUNT(*) AS samples,
+              SUM(ok) AS up,
+              AVG(CASE WHEN ok = 1 THEN latency_ms END) AS avg_latency
+       FROM probe_sample WHERE target = ? AND at >= ?`,
+    )
+    const deleteOldProbes = db.prepare('DELETE FROM probe_sample WHERE at < ?')
 
     return {
       kind: 'sqlite',
@@ -99,6 +142,24 @@ export async function createStore(dataDir: string): Promise<SnapshotStore> {
         const row = atOrBefore.get(env, at) as Row | undefined
         return row ? toRow(row) : null
       },
+      recordProbe(target, at, ok, latencyMs) {
+        insertProbe.run(target, at, ok ? 1 : 0, latencyMs == null ? null : Math.round(latencyMs))
+      },
+      probeStats(target, since) {
+        const row = statsFor.get(target, since) as Row | undefined
+        const samples = Number(row?.samples ?? 0)
+        if (samples === 0) return EMPTY_STATS
+        const up = Number(row?.up ?? 0)
+        return {
+          samples,
+          up,
+          uptimePct: (up / samples) * 100,
+          avgLatencyMs: row?.avg_latency == null ? null : Math.round(Number(row.avg_latency)),
+        }
+      },
+      pruneProbes(before) {
+        deleteOldProbes.run(before)
+      },
       close() {
         db.close()
       },
@@ -108,8 +169,13 @@ export async function createStore(dataDir: string): Promise<SnapshotStore> {
   }
 }
 
-export function createMemoryStore(limit = 24 * 14): SnapshotStore {
+/** Keeps the same window as SQLite would, minus the file: 24 h of probes at one
+    per minute is 1440 samples, so the cap holds a full day per target. */
+const MEMORY_PROBE_LIMIT = 2000
+
+export function createMemoryStore(limit = 24 * 14): Store {
   const rows = new Map<string, SnapshotRow[]>()
+  const probes = new Map<string, Array<{ at: number; ok: boolean; latencyMs: number | null }>>()
   return {
     kind: 'memory',
     record(env, sample, now) {
@@ -132,8 +198,36 @@ export function createMemoryStore(limit = 24 * 14): SnapshotStore {
       }
       return null
     },
+    recordProbe(target, at, ok, latencyMs) {
+      const list = probes.get(target) ?? []
+      list.push({ at, ok, latencyMs })
+      if (list.length > MEMORY_PROBE_LIMIT) list.shift()
+      probes.set(target, list)
+    },
+    probeStats(target, since) {
+      const list = (probes.get(target) ?? []).filter(sample => sample.at >= since)
+      if (list.length === 0) return EMPTY_STATS
+      const up = list.filter(sample => sample.ok).length
+      const latencies = list.filter(sample => sample.ok && sample.latencyMs != null).map(s => s.latencyMs as number)
+      return {
+        samples: list.length,
+        up,
+        uptimePct: (up / list.length) * 100,
+        avgLatencyMs: latencies.length === 0
+          ? null
+          : Math.round(latencies.reduce((total, value) => total + value, 0) / latencies.length),
+      }
+    },
+    pruneProbes(before) {
+      for (const [target, list] of probes) {
+        const kept = list.filter(sample => sample.at >= before)
+        if (kept.length === 0) probes.delete(target)
+        else probes.set(target, kept)
+      }
+    },
     close() {
       rows.clear()
+      probes.clear()
     },
   }
 }

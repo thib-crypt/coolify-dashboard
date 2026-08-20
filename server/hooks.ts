@@ -1,5 +1,5 @@
 /**
- * Receiver for Coolify's outgoing webhooks (phase 3 of PLAN.md).
+ * Receiver for Coolify's outgoing webhooks (phase 3 of docs/roadmap.md).
  *
  * This is the only genuine *push* Coolify offers a third party, and it comes
  * with three constraints that shape everything below:
@@ -25,6 +25,7 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 import type { LiveEvent, ToastTone } from '../shared/bff'
 import type * as Api from '../shared/coolify-api'
 import { deploymentFinishedKey } from './events'
+import type { Signal } from './signals'
 
 export interface WebhookEffect {
   /** cache key prefixes to drop, so the next `/app/overview` re-reads upstream */
@@ -42,6 +43,13 @@ export interface WebhookEffect {
   refresh: LiveEvent
   /** true when the event may have changed which deployments are running */
   pokePoller: boolean
+  /**
+   * Readings the REST API does not expose, to be remembered until they expire
+   * (`signals.ts`). Recorded on every delivery, retry included: writing the same
+   * value twice is harmless, and dropping it would lose the figure whenever the
+   * first attempt was the one that failed.
+   */
+  signals: Signal[]
 }
 
 const nonEmpty = (value: unknown): string | null =>
@@ -75,6 +83,7 @@ export function interpretWebhook(payload: Api.CoolifyWebhookPayload, at: string)
     events: [],
     refresh: { type: 'overview-changed', at, reason: `webhook ${event}` },
     pokePoller: false,
+    signals: [],
   }
   const toast = (message: string, tone: ToastTone, key: string) => {
     effect.events.push({ event: { type: 'toast', at, message, tone }, key })
@@ -135,6 +144,11 @@ export function interpretWebhook(payload: Api.CoolifyWebhookPayload, at: string)
     case 'high_disk_usage': {
       effect.invalidate.push('servers')
       const usage = typeof payload.disk_usage === 'number' ? ` — disk at ${payload.disk_usage} %` : ''
+      // The only place this number ever appears: keep it for the Fleet gauge
+      // and the insight, both of which outlive the toast.
+      if (typeof payload.disk_usage === 'number' && who) {
+        effect.signals.push({ kind: 'disk_usage', subject: who, value: payload.disk_usage, at: Date.parse(at) })
+      }
       toast(`${who ?? 'A server'} is running out of space${usage}`, 'warn', `${event}:${who ?? 'unknown'}`)
       break
     }

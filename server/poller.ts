@@ -1,5 +1,5 @@
 /**
- * Adaptive polling loop (phase 3 of PLAN.md).
+ * Adaptive polling loop (phase 3 of docs/roadmap.md).
  *
  * Coolify has no push channel a third party can use: `POST /broadcasting/auth`
  * is session-authenticated and outside the CORS paths, and **no deployment
@@ -13,7 +13,7 @@
  *    subscriber transitions; with no SSE client there is nothing to push to and
  *    `/app/overview` refreshes its own cache anyway.
  *  - **It adapts.** 2.5 s while a deployment is running (24 req/min), 4 s
- *    otherwise (15 req/min) — annexe B of PLAN.md budgets 200 req/min *per user*,
+ *    otherwise (15 req/min) — appendix B of docs/roadmap.md budgets 200 req/min *per user*,
  *    and this is the only poller left, see the cadence constants below.
  *  - **It reads `/deployments` only.** That list already carries `logs` when the
  *    token has `read:sensitive` (`DeployController::removeSensitiveData`), so
@@ -39,9 +39,9 @@ import { describeError } from './overview'
  * deployment starts** (the notification classes cover success, failure, status,
  * backups, tasks and servers — nothing for a build beginning). So this interval
  * *is* how long a deployment launched from Coolify's own UI stays invisible
- * here, and PLAN.md asks for under five seconds.
+ * here, and docs/roadmap.md asks for under five seconds.
  *
- * That is still cheaper than annexe B budgeted. Annexe B assumed two pollers —
+ * That is still cheaper than appendix B budgeted. Appendix B assumed two pollers —
  * `/deployments` at 3 s plus `/deployments/{uuid}` at 2.5 s for the live log,
  * 44 req/min together. One list call serves both purposes, so the ceiling here
  * is 24 req/min while building and 15 req/min at rest — and zero with no

@@ -42,18 +42,46 @@ export interface Deployment {
   logs?: string[]
 }
 
-/** `null` = no Sentinel metrics endpoint in the REST API (see PLAN.md phase 5). */
+/**
+ * Where `cpu`/`mem` come from — or, far more often, why they are missing.
+ *
+ * Coolify exposes no REST endpoint for either: its own charts SSH into the
+ * server and query the Sentinel agent. This dashboard can do the same
+ * (docs/roadmap.md phase 5), but only once it is given an SSH key, so the honest
+ * default is an empty gauge that says which of these four silences it is.
+ */
+export type MetricsSource =
+  /** real percentages, read from the server's Sentinel agent */
+  | 'sentinel'
+  /** no collector configured here — the default install */
+  | 'off'
+  /** Sentinel metrics are switched off on that server */
+  | 'sentinel-off'
+  /** Sentinel is on, but its newest sample is too old to pass as current */
+  | 'stale'
+  /** the collector tried and failed — SSH, the token, the agent */
+  | 'error'
+
+/**
+ * `cpu`/`mem`: real numbers when `source` is `sentinel`, `null` otherwise —
+ * never a plausible-looking figure standing in for one we could not read.
+ * `dsk`: the percentage from Coolify's last `high_disk_usage` webhook, and
+ * only while that alert still stands; `null` otherwise.
+ */
 export interface ServerMetrics {
   cpu: number | null
   mem: number | null
   dsk: number | null
+  source: MetricsSource
+  /** one sentence explaining `source`, shown on hover over the gauges */
+  note: string
 }
 
 export interface Server {
   id: string
   name: string
   region: string
-  /** `null` until the BFF probes servers (PLAN.md phase 4). */
+  /** TCP handshake time from the BFF, `null` when probing is off. */
   pingMs: number | null
   reachable: boolean
   metrics: ServerMetrics
@@ -62,7 +90,7 @@ export interface Server {
 /**
  * The four figures under the fleet panel. Coolify's API exposes none of the
  * hardware totals (vCPU/RAM/storage), so the BFF decides what to put here —
- * real counts today, Hetzner inventory later (PLAN.md phase 7).
+ * real counts today, Hetzner inventory later (docs/roadmap.md phase 7).
  */
 export type FleetTotals = Array<{ id: string; label: string; value: string }>
 
@@ -71,7 +99,13 @@ export interface Insight {
   severity: Trend
   title: string
   description: string
+  /** label of the button — always says where it goes */
   action: string
+  /**
+   * Deep link into Coolify's own UI for the resource this is about. Absent when
+   * there is nothing to open (the all-clear row); the button is then inert.
+   */
+  href?: string
 }
 
 export interface Application {
@@ -81,7 +115,11 @@ export interface Application {
   initial: string
   /** css gradient used by the app tile */
   gradient: string
-  /** `null` until uptime probes land (PLAN.md phase 4) — shown as "—". */
+  /**
+   * Measured by the BFF's own HTTP probes over 24 h ("99.98 %"). `null` — shown
+   * as "—" — when the application has no public domain, when probing is off, or
+   * before enough samples exist to mean anything.
+   */
   uptime: string | null
   /** `null` when the app's settings could not be read. */
   autoDeploy: boolean | null

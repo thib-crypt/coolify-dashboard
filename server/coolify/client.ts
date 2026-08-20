@@ -68,6 +68,12 @@ export interface CoolifyClient {
   applications(): Promise<Api.Application[]>
   application(uuid: string): Promise<Api.Application>
   servers(): Promise<Api.Server[]>
+  /**
+   * Sentinel's configuration for one server (phase 5). `sentinel_token` — the
+   * only reason the metrics collector calls this — is withheld unless the token
+   * carries `read:sensitive`, in which case the field is simply absent.
+   */
+  serverSentinel(uuid: string): Promise<Api.SentinelSettings>
   /** only `queued` + `in_progress` — history is per application */
   runningDeployments(): Promise<Api.ApplicationDeploymentQueue[]>
   /**
@@ -203,6 +209,7 @@ export function createCoolifyClient(config: ConfiguredBffConfig): CoolifyClient 
     applications: () => getArray<Api.Application>('/applications'),
     application: uuid => getJson<Api.Application>(`/applications/${encodeURIComponent(uuid)}`),
     servers: () => getArray<Api.Server>('/servers'),
+    serverSentinel: uuid => getJson<Api.SentinelSettings>(`/servers/${encodeURIComponent(uuid)}/sentinel`),
     runningDeployments: () => getArray<Api.ApplicationDeploymentQueue>('/deployments'),
     deployment: uuid =>
       getJson<Api.ApplicationDeploymentQueue>(`/deployments/${encodeURIComponent(uuid)}`),

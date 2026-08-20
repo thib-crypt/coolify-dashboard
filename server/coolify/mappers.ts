@@ -15,6 +15,7 @@ import type {
   FleetTotals,
   Insight,
   Kpi,
+  MetricsSource,
   PaletteAction,
   Server,
   Timeline,
@@ -127,41 +128,87 @@ export function gradientFor(seed: string): string {
   return GRADIENTS[hash % GRADIENTS.length] as string
 }
 
-export function mapApplication(app: Api.Application, autoDeploy: boolean | null): Application {
+export function mapApplication(
+  app: Api.Application,
+  autoDeploy: boolean | null,
+  /** measured by the BFF's own HTTP probes (phase 4); `null` when not probed */
+  uptime: string | null = null,
+): Application {
   return {
     id: app.uuid,
     name: app.name,
     domain: displayDomain(app.fqdn),
     initial: initialOf(app.name),
     gradient: gradientFor(app.uuid),
-    // Coolify has no uptime history — probes land in phase 4.
-    uptime: null,
+    uptime,
     autoDeploy,
   }
 }
 
-export function mapServer(server: Api.Server): Server {
+/** What the BFF measures itself and the REST API does not carry (phases 4 & 5). */
+export interface ServerReadings {
+  /** TCP handshake time from the BFF to the server's SSH port */
+  pingMs?: number | null
+  /**
+   * Percentage from the last `high_disk_usage` webhook. Only meaningful while
+   * Coolify still considers the disk full — it stops sending readings once the
+   * situation clears, so an old value outside that window would be a lie.
+   */
+  diskPct?: number | null
+  /** Sentinel's own percentages, `null` unless `source` is `sentinel`. */
+  cpu?: number | null
+  mem?: number | null
+  /** where cpu/mem came from, or which silence this is */
+  source?: MetricsSource
+  note?: string
+}
+
+export function mapServer(server: Api.Server, readings: ServerReadings = {}): Server {
+  const diskAlert = server.high_disk_usage_notification_sent === true
+  const source = readings.source ?? 'off'
+  const measured = source === 'sentinel'
   return {
     id: server.uuid,
     name: server.name,
     // Coolify has no notion of region; the address is the honest stand-in.
     region: server.description?.trim() || server.ip || '—',
-    // No REST endpoint for latency; a TCP probe would be phase 4.
-    pingMs: null,
+    pingMs: readings.pingMs ?? null,
     reachable: server.is_reachable ?? server.settings?.is_reachable ?? false,
-    // No REST endpoint for CPU/RAM/disk — see PLAN.md phase 5.
-    metrics: { cpu: null, mem: null, dsk: null },
+    metrics: {
+      // CPU and RAM come from Sentinel over SSH (docs/roadmap.md phase 5) or not at all:
+      // a reading the collector could not take is never rounded up into a zero.
+      cpu: measured ? (readings.cpu ?? null) : null,
+      mem: measured ? (readings.mem ?? null) : null,
+      // Disk is the one figure a webhook can supply, and only while the alert stands.
+      dsk: diskAlert ? (readings.diskPct ?? null) : null,
+      source,
+      note: readings.note ?? 'No metrics source configured for this server.',
+    },
   }
 }
 
 export function buildFleetTotals(servers: Server[], applicationCount: number): FleetTotals {
   const reachable = servers.filter(s => s.reachable).length
+  // The fourth tile changes meaning with what is actually known. Hardware
+  // totals (vCPU, RAM, storage) are not in the API at all — those wait for the
+  // Hetzner inventory of phase 7 — but once Sentinel is being read, the mean
+  // CPU load across the fleet is a real number, and it is labelled as one
+  // rather than smuggled in under "Capacity".
+  const loads = servers.map(server => server.metrics.cpu).filter((cpu): cpu is number => cpu !== null)
+  const load =
+    loads.length === 0
+      ? { id: 'capacity', label: 'Capacity', value: '—' }
+      : {
+          id: 'load',
+          label: loads.length === servers.length ? 'Avg load' : `Avg load (${loads.length}/${servers.length})`,
+          value: `${Math.round(loads.reduce((total, cpu) => total + cpu, 0) / loads.length)}%`,
+        }
+
   return [
     { id: 'servers', label: 'Servers', value: String(servers.length) },
     { id: 'reachable', label: 'Reachable', value: `${reachable}/${servers.length}` },
     { id: 'apps', label: 'Applications', value: String(applicationCount) },
-    // Placeholder until Sentinel metrics or Hetzner inventory land (phases 5 & 7).
-    { id: 'capacity', label: 'Capacity', value: '—' },
+    load,
   ]
 }
 
@@ -478,7 +525,7 @@ function backupsKpi(input: KpiInput): Kpi {
 }
 
 /** KPI 3 and 4 replace the mockup's P95 and monthly cost, which have no source
-    in Coolify core (see the mapping table in PLAN.md §3). */
+    in Coolify core (see the mapping table in docs/roadmap.md, appendix C). */
 export function buildKpis(input: KpiInput): Kpi[] {
   return [applicationsKpi(input), deploymentsKpi(input), medianDeployKpi(input), backupsKpi(input)]
 }
@@ -582,46 +629,273 @@ export function buildTimeline(now: number, jobs: TimelineJob[], maxJobs = 8): Ti
   }
 }
 
+/* --------------------------------------------------------------- links --- */
+
+/** Where a resource lives in Coolify's own URL space. */
+export interface ResourceLocation {
+  projectUuid: string
+  environmentUuid: string
+}
+
+/**
+ * Deep links back into Coolify's UI.
+ *
+ * An insight that only states a problem is half an insight — the button has to
+ * land on the page where the problem gets fixed. Coolify's resource routes need
+ * the project *and* the environment uuid on top of the resource's own
+ * (`routes/web.php`), which the BFF already collects while resolving
+ * environment names. Without that mapping the link falls back to the instance
+ * root, which still beats a dead button.
+ */
+export interface CoolifyLinks {
+  root(): string
+  server(uuid: string): string
+  application(uuid: string, environmentId: number | undefined, tab?: string): string
+  database(uuid: string, environmentId: number | undefined, tab?: string): string
+}
+
+export function createLinks(baseUrl: string, locations: Map<number, ResourceLocation> = new Map()): CoolifyLinks {
+  const base = baseUrl.replace(/\/+$/, '')
+
+  const resource = (kind: 'application' | 'database', uuid: string, environmentId: number | undefined, tab?: string) => {
+    const place = environmentId === undefined ? undefined : locations.get(environmentId)
+    if (!place) return base
+    const path = `${base}/project/${place.projectUuid}/environment/${place.environmentUuid}/${kind}/${uuid}`
+    return tab ? `${path}/${tab}` : path
+  }
+
+  return {
+    root: () => base,
+    server: uuid => `${base}/server/${uuid}`,
+    application: (uuid, environmentId, tab) => resource('application', uuid, environmentId, tab),
+    database: (uuid, environmentId, tab) => resource('database', uuid, environmentId, tab),
+  }
+}
+
 /* ------------------------------------------------------------ insights ---- */
 
 export interface AppHealth {
   uuid: string
   name: string
   status: ParsedStatus
+  /** for the deep link; the environment a resource belongs to */
+  environmentId?: number
+}
+
+/** A server plus the things the mapped `Server` deliberately does not carry. */
+export interface ServerHealth {
+  server: Server
+  /** Coolify has sent a `high_disk_usage` notification and not cleared it */
+  diskAlert: boolean
+  /** the figure from that webhook, when one reached the BFF */
+  diskPct: number | null
+  unreachableCount: number
+  /**
+   * The operator configured the Sentinel collector (phase 5), so an empty CPU
+   * gauge is a fault worth reporting rather than the expected default.
+   */
+  metricsExpected: boolean
+}
+
+/** One application as seen from the outside, by the BFF's own probes. */
+export interface ProbeHealth {
+  uuid: string
+  name: string
+  host: string
+  environmentId?: number
+  /** `null` before the first probe */
+  up: boolean | null
+  consecutiveFailures: number
+  /** `null` until enough samples to mean anything */
+  uptimePct: number | null
+  samples: number
+  tls: { daysLeft: number | null; trusted: boolean; error: string | null } | null
+}
+
+export interface BackupFailure {
+  database: string
+  databaseUuid: string
+  environmentId?: number
+  at: number
 }
 
 export interface InsightInput {
-  servers: Server[]
+  servers: ServerHealth[]
   applications: AppHealth[]
+  /** empty when probing is disabled — every probe-based rule then stays quiet */
+  probes: ProbeHealth[]
   /** failed deployments in the last 24 h, newest first */
   recentFailures: Array<{ app: string; at: number }>
+  /** failed backup executions in the last 24 h */
+  backupFailures: BackupFailure[]
+  links: CoolifyLinks
   now: number
 }
 
+/** Consecutive failed probes before an application is called down (probes.ts). */
+export const DOWN_AFTER_FAILURES = 3
+/** A certificate closer than this to expiry is worth a warning. */
+export const TLS_WARN_DAYS = 14
+/** Below this, a day of probing was not a good day. */
+export const UPTIME_TARGET_PCT = 99.5
+
+const SEVERITY_RANK: Record<Insight['severity'], number> = { err: 0, warn: 1, neutral: 2, ok: 3 }
+
 /**
- * The subset of PLAN.md's rules engine that needs no probe and no webhook:
- * everything here is derivable from the read-only payloads phase 1 already
- * fetches. TLS expiry, disk pressure and backup failures join in phase 4.
+ * The rules engine of phase 4. Every rule is a pure read of the state the BFF
+ * already holds — REST payloads, its own probe results, the readings webhooks
+ * carried — so the whole column is testable without a network.
+ *
+ * Rules push in order of how much they usually matter; the sort that follows is
+ * stable, so within one severity that order is what the reader sees. Anything
+ * past `limit` is not dropped silently: the last row says how many are hidden,
+ * because a panel that shows five of nine problems while claiming "5" is worse
+ * than no panel.
  */
 export function buildInsights(input: InsightInput, limit = 5): Insight[] {
+  const { links, now } = input
   const insights: Insight[] = []
 
-  for (const server of input.servers) {
+  /* --- servers ------------------------------------------------------- */
+  for (const { server, unreachableCount } of input.servers) {
     if (server.reachable) continue
+    const attempts = unreachableCount > 1 ? ` Coolify has failed to reach it ${unreachableCount} times.` : ''
     insights.push({
       id: `server-unreachable-${server.id}`,
       severity: 'err',
       title: `${server.name} is unreachable`,
-      description: `Coolify cannot open an SSH connection to ${server.region}. Everything hosted there is unmanaged until it comes back.`,
-      action: 'Investigate',
+      description: `Coolify cannot open an SSH connection to ${server.region}.${attempts} Everything hosted there is unmanaged until it comes back.`,
+      action: 'Open server',
+      href: links.server(server.id),
     })
   }
 
+  for (const { server, diskAlert, diskPct } of input.servers) {
+    if (!diskAlert) continue
+    const critical = diskPct !== null && diskPct >= 90
+    insights.push({
+      id: `server-disk-${server.id}`,
+      severity: critical ? 'err' : 'warn',
+      title: diskPct === null ? `${server.name} is low on disk space` : `${server.name} disk at ${Math.round(diskPct)} %`,
+      description:
+        'Coolify raised a high disk usage alert. Builds fail first, then containers stop writing — a Docker cleanup or a bigger volume buys the time back.',
+      action: 'Open server',
+      href: links.server(server.id),
+    })
+  }
+
+  /**
+   * Metrics the operator asked for and is not getting (phase 5). Silent by
+   * design on a default install: with no collector configured, an empty gauge
+   * is the documented state, not a problem. Once `METRICS_SSH_KEY` is set,
+   * every empty gauge is a misconfiguration someone meant to avoid.
+   */
+  for (const { server, metricsExpected } of input.servers) {
+    if (!metricsExpected) continue
+    // An unreachable server already has an `err` row saying more than this would.
+    if (!server.reachable || server.metrics.source === 'sentinel') continue
+    const off = server.metrics.source === 'sentinel-off'
+    insights.push({
+      id: `metrics-${server.metrics.source}-${server.id}`,
+      severity: 'warn',
+      title: off ? `Sentinel metrics are off on ${server.name}` : `No metrics from ${server.name}`,
+      description: server.metrics.note,
+      action: 'Open server',
+      href: links.server(server.id),
+    })
+  }
+
+  /* --- applications, as Coolify sees them ----------------------------- */
+  const brokenApps = new Set<string>()
+  for (const app of input.applications) {
+    if (isRunning(app.status) && app.status.health !== 'unhealthy') continue
+    brokenApps.add(app.uuid)
+    insights.push({
+      id: `app-status-${app.uuid}`,
+      severity: isRunning(app.status) ? 'warn' : 'err',
+      title: isRunning(app.status) ? `${app.name} is unhealthy` : `${app.name} is ${app.status.state}`,
+      description: isRunning(app.status)
+        ? 'The container runs but its healthcheck keeps failing.'
+        : `Container state reported by Coolify: ${app.status.state}:${app.status.health}.`,
+      action: 'Open application',
+      href: links.application(app.uuid, app.environmentId),
+    })
+  }
+
+  /* --- applications, as the internet sees them ------------------------ */
+  for (const probe of input.probes) {
+    if (probe.consecutiveFailures < DOWN_AFTER_FAILURES) continue
+    // Coolify already says the container is down: one problem, one insight.
+    if (brokenApps.has(probe.uuid)) continue
+    insights.push({
+      id: `probe-down-${probe.uuid}`,
+      severity: 'err',
+      title: `${probe.name} is not answering`,
+      description: `Coolify reports the container as running, but ${probe.host} has failed ${probe.consecutiveFailures} probes in a row from this dashboard. Suspect the proxy, DNS, or a healthy container serving errors.`,
+      action: 'Open application',
+      href: links.application(probe.uuid, probe.environmentId),
+    })
+  }
+
+  /* --- certificates --------------------------------------------------- */
+  for (const probe of input.probes) {
+    const tls = probe.tls
+    if (!tls) continue
+    if (tls.daysLeft === null) {
+      // Only worth saying when the handshake itself failed on the certificate;
+      // a host that is simply down is already covered above.
+      if (tls.error && probe.up) {
+        insights.push({
+          id: `tls-error-${probe.uuid}`,
+          severity: 'warn',
+          title: `${probe.name} has a certificate problem`,
+          description: `The TLS handshake with ${probe.host} reported: ${tls.error}.`,
+          action: 'Open domains',
+          href: links.application(probe.uuid, probe.environmentId, 'domains'),
+        })
+      }
+      continue
+    }
+    if (tls.daysLeft > TLS_WARN_DAYS) continue
+    const expired = tls.daysLeft < 0
+    insights.push({
+      id: `tls-expiry-${probe.uuid}`,
+      severity: expired || tls.daysLeft <= 3 ? 'err' : 'warn',
+      title: expired
+        ? `Certificate of ${probe.name} has expired`
+        : `Certificate of ${probe.name} expires in ${tls.daysLeft} d`,
+      description: expired
+        ? `${probe.host} is serving a certificate that expired ${Math.abs(tls.daysLeft)} d ago — browsers are already refusing it.`
+        : `${probe.host} renews automatically through Let's Encrypt; this close to expiry, the renewal is failing.`,
+      action: 'Open domains',
+      href: links.application(probe.uuid, probe.environmentId, 'domains'),
+    })
+  }
+
+  /* --- backups -------------------------------------------------------- */
+  for (const failure of input.backupFailures) {
+    insights.push({
+      id: `backup-failed-${failure.databaseUuid}`,
+      severity: 'err',
+      title: `Backup of ${failure.database} failed`,
+      description: `The scheduled backup did not complete (${formatRelative(failure.at, now)}). Until it does, the recovery point is the last successful run.`,
+      action: 'Open backups',
+      href: links.database(failure.databaseUuid, failure.environmentId, 'backups'),
+    })
+  }
+
+  /* --- deployments ---------------------------------------------------- */
   // Group repeated failures per app: three failed runs is one problem, not three.
   const failuresByApp = new Map<string, number>()
   for (const failure of input.recentFailures) {
     failuresByApp.set(failure.app, (failuresByApp.get(failure.app) ?? 0) + 1)
   }
+  const appByName = new Map(input.applications.map(app => [app.name, app]))
+  const deploymentLink = (name: string) => {
+    const app = appByName.get(name)
+    return app ? links.application(app.uuid, app.environmentId, 'deployment') : links.root()
+  }
+
   for (const [app, count] of failuresByApp) {
     if (count < 2) continue
     insights.push({
@@ -630,19 +904,7 @@ export function buildInsights(input: InsightInput, limit = 5): Insight[] {
       title: `${count} failed deployments on ${app}`,
       description: 'Every attempt in the last 24 hours ended in failure — the build or the healthcheck is broken, not flaky.',
       action: 'Open logs',
-    })
-  }
-
-  for (const app of input.applications) {
-    if (isRunning(app.status) && app.status.health !== 'unhealthy') continue
-    insights.push({
-      id: `app-status-${app.uuid}`,
-      severity: isRunning(app.status) ? 'warn' : 'err',
-      title: isRunning(app.status) ? `${app.name} is unhealthy` : `${app.name} is ${app.status.state}`,
-      description: isRunning(app.status)
-        ? 'The container runs but its healthcheck keeps failing.'
-        : `Container state reported by Coolify: ${app.status.state}:${app.status.health}.`,
-      action: 'Investigate',
+      href: deploymentLink(app),
     })
   }
 
@@ -654,25 +916,61 @@ export function buildInsights(input: InsightInput, limit = 5): Insight[] {
       title: `Last deployment of ${app} failed`,
       description: 'One failure in the last 24 hours. The previous release is still serving traffic.',
       action: 'Open logs',
+      href: deploymentLink(app),
+    })
+  }
+
+  /* --- uptime --------------------------------------------------------- */
+  for (const probe of input.probes) {
+    if (probe.uptimePct === null || probe.uptimePct >= UPTIME_TARGET_PCT) continue
+    // An application that is down right now is already an insight of its own.
+    if (probe.consecutiveFailures >= DOWN_AFTER_FAILURES || brokenApps.has(probe.uuid)) continue
+    insights.push({
+      id: `uptime-${probe.uuid}`,
+      severity: 'warn',
+      title: `${probe.name} answered ${probe.uptimePct.toFixed(2)} % of the time`,
+      description: `Measured by this dashboard over the last 24 h, across ${probe.samples} probes of ${probe.host}. Short outages that resolve on their own usually mean a restart loop or a saturated proxy.`,
+      action: 'Open application',
+      href: links.application(probe.uuid, probe.environmentId),
     })
   }
 
   if (insights.length === 0) {
-    insights.push({
-      id: 'all-clear',
-      severity: 'ok',
-      title: 'Nothing needs your attention',
-      description: 'Every server is reachable, every application is running and no deployment failed in the last 24 hours.',
-      action: 'View',
-    })
+    return [
+      {
+        id: 'all-clear',
+        severity: 'ok',
+        title: 'Nothing needs your attention',
+        description:
+          'Every server is reachable, every application is running and no deployment failed in the last 24 hours.',
+        action: 'View',
+      },
+    ]
   }
 
-  return insights.slice(0, limit)
+  insights.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
+
+  if (insights.length <= limit) return insights
+
+  const hidden = insights.length - (limit - 1)
+  return [
+    ...insights.slice(0, limit - 1),
+    {
+      id: 'more-insights',
+      severity: insights[limit - 1]?.severity ?? 'warn',
+      title: `${hidden} more issues need attention`,
+      description: 'The panel shows the most serious ones first. The rest are in Coolify.',
+      action: 'Open Coolify',
+      href: links.root(),
+    },
+  ]
 }
 
 export function deriveSystemStatus(
   servers: Server[],
   failuresLastHour: number,
+  /** applications the BFF's probes cannot reach — worse news than a failed build */
+  downApplications: string[] = [],
 ): { ok: boolean; label: string } {
   const unreachable = servers.filter(server => !server.reachable)
   if (unreachable.length > 0) {
@@ -681,6 +979,14 @@ export function deriveSystemStatus(
       label: unreachable.length === 1
         ? `${unreachable[0]?.name} unreachable`
         : `${unreachable.length} servers unreachable`,
+    }
+  }
+  if (downApplications.length > 0) {
+    return {
+      ok: false,
+      label: downApplications.length === 1
+        ? `${downApplications[0]} not answering`
+        : `${downApplications.length} applications not answering`,
     }
   }
   if (failuresLastHour > 0) {

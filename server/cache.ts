@@ -1,7 +1,7 @@
 /** Per-family TTL cache with single-flight and stale-on-error.
  *
  * Two properties matter here, both about the 200 req/min budget Coolify
- * enforces *per user* (annexe B of PLAN.md):
+ * enforces *per user* (appendix B of docs/roadmap.md):
  *  - single-flight: N concurrent browser tabs hitting /app/overview at once
  *    produce **one** upstream call, not N;
  *  - stale-on-error: a blip upstream degrades the dashboard rather than
@@ -88,7 +88,7 @@ export class TtlCache {
   }
 }
 
-/** TTL per resource family — see annexe B of PLAN.md for the budget. */
+/** TTL per resource family — see appendix B of docs/roadmap.md for the budget. */
 export const TTL = {
   version: 10 * 60_000,
   team: 5 * 60_000,

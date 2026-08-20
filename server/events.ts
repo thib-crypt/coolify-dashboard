@@ -1,5 +1,5 @@
 /**
- * The push side of the BFF (phase 3 of PLAN.md): one in-process hub, N browser
+ * The push side of the BFF (phase 3 of docs/roadmap.md): one in-process hub, N browser
  * tabs hanging off it over SSE.
  *
  * Two producers feed the same hub and they overlap on purpose — Coolify's

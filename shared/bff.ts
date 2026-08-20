@@ -18,6 +18,42 @@ export interface HealthResponse {
   notes: DegradedNote[]
   /** state of the push channel (phase 3) */
   live: LiveStatus
+  /** state of the outbound probes (phase 4) */
+  probes: ProbeStatus
+  /** state of the Sentinel metrics collector (phase 5) */
+  metrics: MetricsStatus
+}
+
+/**
+ * Whether the Fleet gauges have a source behind them.
+ *
+ * Coolify publishes no metrics endpoint, so `enabled: false` — the default —
+ * is a statement about this deployment, not a fault: it means no SSH key was
+ * given to the BFF and CPU/RAM will render as em dashes with a reason.
+ */
+export interface MetricsStatus {
+  /** true once METRICS_SSH_KEY is set and the collector is running */
+  enabled: boolean
+  /** servers the collector queries */
+  servers: number
+  /** of those, how many returned real percentages on the last cycle */
+  reporting: number
+  intervalMs: number
+  /** end of the last full cycle, null before the first one */
+  lastRunAt: string | null
+}
+
+/** How the BFF is measuring what Coolify does not measure. */
+export interface ProbeStatus {
+  /** false when PROBES_ENABLED is off — uptime, latency and TLS are then unknown */
+  enabled: boolean
+  /** applications with a public domain currently being probed */
+  applications: number
+  /** servers being TCP-probed for latency */
+  servers: number
+  intervalMs: number
+  /** end of the last full cycle, null before the first one */
+  lastRunAt: string | null
 }
 
 /** How the BFF is currently learning that something changed. */

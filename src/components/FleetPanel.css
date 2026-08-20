@@ -30,3 +30,7 @@
 /* no metrics source (Coolify exposes none over REST) — an empty rail, not a zero bar */
 .meter--unknown .bar{background:repeating-linear-gradient(90deg,#eeeef1 0 3px,transparent 3px 6px)}
 .meter--unknown .val{color:var(--t3)}
+/* no CPU/RAM source at all (the default: Coolify publishes no metrics endpoint) —
+   said once in the header instead of three times per row */
+.fleet-nometrics{color:var(--t3);cursor:help}
+.meter--unknown{cursor:help}

@@ -1,5 +1,8 @@
 import type { Dashboard, DataSource, EnvironmentName, Server, ServerMetrics } from './types'
 
+/** The mock stands in for a fully-instrumented instance: Sentinel is reading. */
+const MOCK_METRICS = { source: 'sentinel', note: 'Sampled locally — the mock has no Sentinel behind it.' } as const
+
 const dashboard: Dashboard = {
   org: 'orbit',
   environment: 'Production',
@@ -109,9 +112,9 @@ const dashboard: Dashboard = {
   ],
 
   servers: [
-    { id: 'fsn1', name: 'hetzner-fsn1', region: 'Falkenstein', pingMs: 4, reachable: true, metrics: { cpu: 34, mem: 61, dsk: 42 } },
-    { id: 'hel1', name: 'hetzner-hel1', region: 'Helsinki', pingMs: 21, reachable: true, metrics: { cpu: 22, mem: 87, dsk: 55 } },
-    { id: 'ash', name: 'hetzner-ash', region: 'Ashburn', pingMs: 96, reachable: true, metrics: { cpu: 12, mem: 38, dsk: 23 } },
+    { id: 'fsn1', name: 'hetzner-fsn1', region: 'Falkenstein', pingMs: 4, reachable: true, metrics: { cpu: 34, mem: 61, dsk: 42, ...MOCK_METRICS } },
+    { id: 'hel1', name: 'hetzner-hel1', region: 'Helsinki', pingMs: 21, reachable: true, metrics: { cpu: 22, mem: 87, dsk: 55, ...MOCK_METRICS } },
+    { id: 'ash', name: 'hetzner-ash', region: 'Ashburn', pingMs: 96, reachable: true, metrics: { cpu: 12, mem: 38, dsk: 23, ...MOCK_METRICS } },
   ],
   fleetTotals: [
     { id: 'vcpu', label: 'vCPU total', value: '18' },
@@ -205,6 +208,7 @@ export const mockSource: DataSource = {
     // the mock always has numbers; the live source has nulls it must not drift
     if (m.cpu === null || m.mem === null || m.dsk === null) return m
     return {
+      ...m,
       cpu: clamp(m.cpu + (Math.random() - 0.5) * 7, 4, 97),
       mem: clamp(m.mem + (Math.random() - 0.5) * 2.5, 10, 97),
       dsk: clamp(m.dsk + (Math.random() - 0.48) * 0.4, 5, 97),

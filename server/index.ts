@@ -11,17 +11,23 @@ import type {
   HealthResponse,
   LiveEvent,
   LiveStatus,
+  MetricsStatus,
+  ProbeStatus,
   WebhookAck,
 } from '../shared/bff'
 import type * as Api from '../shared/coolify-api'
 import { createActionService, type ActionService } from './actions'
-import { TtlCache } from './cache'
+import { TTL, TtlCache } from './cache'
 import { isConfigured, loadConfig, loadEnvFile, missingConfig } from './config'
 import { CoolifyError, createCoolifyClient, type ApplicationAction, type TaskOwner } from './coolify/client'
+import { parseApiDate } from './coolify/mappers'
 import { createEventHub } from './events'
 import { interpretWebhook, secretMatches } from './hooks'
+import { EMPTY_METRICS, createMetricsCollector, metricsTargets } from './metrics'
 import { createOverviewService, describeError } from './overview'
 import { createPoller } from './poller'
+import { EMPTY_SNAPSHOT, createProber, httpTargets, tcpTargets } from './probes'
+import { createSignalStore } from './signals'
 import { createStore } from './store'
 
 loadEnvFile()
@@ -33,6 +39,9 @@ const cache = new TtlCache()
 const configured = isConfigured(config) ? config : null
 const client = configured ? createCoolifyClient(configured) : null
 
+// Webhook-only readings (disk usage) survive here between two deliveries.
+const signals = createSignalStore()
+
 const service =
   configured && client
     ? createOverviewService({
@@ -41,6 +50,9 @@ const service =
         store,
         historyTake: config.deploymentHistoryTake,
         coolifyUrl: configured.coolifyUrl,
+        probes: () => prober?.snapshot() ?? EMPTY_SNAPSHOT,
+        metrics: () => collector?.snapshot() ?? EMPTY_METRICS,
+        signals,
       })
     : null
 
@@ -54,9 +66,14 @@ const actions = client ? createActionService({ client, cache }) : null
 // `/app/overview` refreshes its own cache on demand anyway.
 const hub = createEventHub({
   onActivity: hasSubscribers => {
-    if (!poller) return
-    if (hasSubscribers) poller.start()
-    else poller.stop()
+    // The collector follows the poller, not the prober: a CPU gauge builds up
+    // no history, so a reading taken while every tab is closed is an SSH
+    // connection spent on a number nobody will ever see.
+    for (const loop of [poller, collector]) {
+      if (!loop) continue
+      if (hasSubscribers) loop.start()
+      else loop.stop()
+    }
   },
 })
 
@@ -69,6 +86,96 @@ const poller = client
       idleMs: config.pollIdleMs,
     })
   : null
+
+/* -------------------------------------------------------------- probes ---- */
+
+/**
+ * The prober needs the fleet, which only Coolify can tell it. It reads through
+ * the same cache as everything else, with a TTL far longer than the families'
+ * own: `/app/overview` and the poller keep those entries warm while anyone is
+ * watching, and when nobody is, one refresh every five minutes is all the
+ * prober costs upstream. Everything else it does goes to the user's own
+ * applications, not to the Coolify API.
+ */
+const PROBE_TARGETS_TTL = 5 * 60_000
+
+const prober =
+  client && config.probes.enabled
+    ? createProber({
+        store,
+        config: config.probes,
+        hub,
+        targets: async () => {
+          const [applications, servers] = await Promise.all([
+            cache.fetch('applications', PROBE_TARGETS_TTL, () => client.applications()),
+            cache.fetch('servers', PROBE_TARGETS_TTL, () => client.servers()),
+          ])
+          return {
+            applications: httpTargets(applications.value, config.probes.only),
+            servers: tcpTargets(servers.value),
+          }
+        },
+      })
+    : null
+
+/* ------------------------------------------------------------- metrics ---- */
+
+/**
+ * Sentinel's settings barely move, and the token inside them moves only when
+ * someone regenerates it — so one read per server every five minutes is enough
+ * to keep the collector supplied. That is ~0.2 req/min per server against the
+ * 200 req/min budget of appendix B, and it is the collector's *entire* upstream
+ * cost: everything else it does is an SSH connection to the user's own server.
+ */
+const SENTINEL_TTL = 5 * 60_000
+const sentinelKey = (uuid: string) => `sentinel:${uuid}`
+
+const collector =
+  client && config.metrics.enabled
+    ? createMetricsCollector({
+        config: config.metrics,
+        hub,
+        targets: async () => {
+          const servers = await cache.fetch('servers', TTL.servers, () => client.servers())
+          return metricsTargets(servers.value, config.metrics)
+        },
+        sentinel: async uuid => {
+          const settings = await cache.fetch(sentinelKey(uuid), SENTINEL_TTL, () => client.serverSentinel(uuid))
+          return {
+            metricsEnabled: settings.value.is_metrics_enabled === true,
+            // Absent — not empty — when the token lacks `read:sensitive`.
+            token: settings.value.sentinel_token ?? null,
+            updatedAt: parseApiDate(settings.value.sentinel_updated_at),
+          }
+        },
+        // A token regenerated in Coolify outlives the cached copy; drop it so the
+        // next cycle asks for the current one instead of failing the same way.
+        onTokenRejected: uuid => cache.invalidate(sentinelKey(uuid)),
+      })
+    : null
+
+const metricsStatus = (): MetricsStatus => {
+  const snapshot = collector?.snapshot() ?? EMPTY_METRICS
+  const readings = [...snapshot.servers.values()]
+  return {
+    enabled: snapshot.enabled && collector !== null,
+    servers: readings.length,
+    reporting: readings.filter(reading => reading.source === 'sentinel').length,
+    intervalMs: config.metrics.intervalMs,
+    lastRunAt: snapshot.lastRunAt === null ? null : new Date(snapshot.lastRunAt).toISOString(),
+  }
+}
+
+const probeStatus = (): ProbeStatus => {
+  const snapshot = prober?.snapshot() ?? EMPTY_SNAPSHOT
+  return {
+    enabled: snapshot.enabled && prober !== null,
+    applications: snapshot.applications.size,
+    servers: snapshot.servers.size,
+    intervalMs: config.probes.intervalMs,
+    lastRunAt: snapshot.lastRunAt === null ? null : new Date(snapshot.lastRunAt).toISOString(),
+  }
+}
 
 let lastWebhookAt: string | null = null
 
@@ -172,11 +279,16 @@ app.get('/app/health', async c => {
       coolify: { configured: false, url: config.coolifyUrl, version: null },
       notes: [{ scope: 'config', reason: notConfigured.error.message }],
       live: liveStatus(),
+      probes: probeStatus(),
+      metrics: metricsStatus(),
     }
     return c.json(body, 503)
   }
   const health = await service.health()
-  return c.json({ ...health, live: liveStatus() }, health.ok ? 200 : 502)
+  return c.json(
+    { ...health, live: liveStatus(), probes: probeStatus(), metrics: metricsStatus() },
+    health.ok ? 200 : 502,
+  )
 })
 
 app.get('/app/overview', async c => {
@@ -288,6 +400,9 @@ app.post('/app/hooks/coolify', async c => {
   const effect = interpretWebhook(payload, at)
 
   for (const prefix of effect.invalidate) cache.invalidate(prefix)
+  // Recorded before the dedupe check: a retry carries the same reading, and
+  // storing it twice is free, whereas losing it would blank the Fleet gauge.
+  for (const signal of effect.signals) signals.record(signal)
 
   // `publish` returns false when the key was already seen — Coolify retries the
   // same event up to five times, and a retry must stay invisible. A payload with
@@ -390,12 +505,31 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: '127.0.0.1
           ? 'webhooks ready on /app/hooks/coolify?secret=…'
           : 'webhooks disabled (set WEBHOOK_SECRET)'),
     )
+    console.log(
+      prober
+        ? `→ probes: HTTP + TLS every ${config.probes.intervalMs / 1000}s, TCP ping on servers — uptime measured here`
+        : '→ probes: disabled (PROBES_ENABLED=false) — uptime, latency and TLS expiry stay unknown',
+    )
+    console.log(
+      collector
+        ? `→ metrics: Sentinel over SSH every ${config.metrics.intervalMs / 1000}s using ${config.metrics.sshKeyPath ?? 'the default SSH identity'}`
+        : '→ metrics: no collector (set METRICS_SSH_KEY) — CPU and RAM gauges stay empty, with a reason',
+    )
+    if (collector && config.metrics.strictHostKey === 'no') {
+      console.warn('→ metrics: host key checking is off — the SSH connection is not authenticating the server')
+    }
   }
 })
+
+// Unlike the poller, this one runs whether or not a browser is connected: an
+// uptime measured only while someone looks is not an uptime.
+prober?.start()
 
 const shutdown = () => {
   // Before `server.close`: an armed poll timer would keep the loop alive.
   poller?.stop()
+  prober?.stop()
+  collector?.stop()
   server.close(() => {
     store.close()
     process.exit(0)
