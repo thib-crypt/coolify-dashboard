@@ -17,9 +17,10 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "types": ["vite/client"],
-    "baseUrl": ".",
+    // Relative to this file, which is what TypeScript wants now that `baseUrl`
+    // is gone (TS6 removed it, TS5 resolves `paths` this way already).
     "paths": {
-      "@shared/*": ["shared/*"]
+      "@shared/*": ["./shared/*"]
     }
   },
   "include": ["src", "shared"]
