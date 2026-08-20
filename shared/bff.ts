@@ -1,7 +1,7 @@
 /** Contract between the React SPA and this repo's BFF (`/app/*`).
     The browser never talks to Coolify: it only ever sees these shapes. */
 
-import type { Dashboard, DeploymentState } from './dashboard'
+import type { Dashboard, Deployment, DeploymentState } from './dashboard'
 
 /**
  * What `GET /app/health` answers to a caller with no session, once
@@ -39,6 +39,81 @@ export interface AuthStatus {
   required: boolean
   /** always true when `required` is false — an open dashboard admits everyone */
   authenticated: boolean
+}
+
+/**
+ * Answer of `GET /app/deployments`. The overview carries five rows because that
+ * is what fits in its panel; this is the same data, unabridged and paginated.
+ */
+export interface DeploymentHistoryResponse {
+  generatedAt: string
+  environment: string
+  /** deployments known for this environment, across every application */
+  total: number
+  /** the slice asked for, newest first */
+  deployments: Deployment[]
+  skip: number
+  take: number
+  notes: DegradedNote[]
+}
+
+/* ------------------------------------------------- one application ------- */
+
+/** One environment variable, as much of it as the token is allowed to see. */
+export interface AppEnvVar {
+  key: string
+  /** `null` when Coolify withheld it — the token has no `read:sensitive` */
+  value: string | null
+  /** true when Coolify only ever shows this value once, so nobody can read it back */
+  writeOnly: boolean
+  buildTime: boolean
+  preview: boolean
+}
+
+/** An image already built and present on the server, ready to be redeployed. */
+export interface RollbackTarget {
+  /** what a rollback is asked for — Coolify calls it `commit`, it is an image tag */
+  tag: string
+  createdAt: string | null
+  /** the one the running container was built from */
+  current: boolean
+}
+
+/** Answer of `GET /app/applications/:uuid`. */
+export interface ApplicationDetailResponse {
+  generatedAt: string
+  uuid: string
+  name: string
+  description: string | null
+  /** primary public domain, empty when the application has none */
+  domain: string
+  /** Coolify's compound `running:healthy` string, split */
+  status: { state: string; health: string | null }
+  repository: string | null
+  branch: string | null
+  buildPack: string | null
+  autoDeploy: boolean | null
+  /** measured here, `null` before enough samples or with no public domain */
+  uptime: string | null
+  /** the Coolify page for this application */
+  link: string | null
+  environment: string | null
+  serverName: string | null
+  envs: AppEnvVar[]
+  rollback: {
+    /** tag the running container was built from, when it could be read */
+    current: string | null
+    targets: RollbackTarget[]
+  }
+  notes: DegradedNote[]
+}
+
+/** Answer of `GET /app/applications/:uuid/logs`. */
+export interface ApplicationLogsResponse {
+  /** newest last, already split; empty when the container is not running */
+  lines: string[]
+  /** why there are no lines, when there are none */
+  note: string | null
 }
 
 /* -------------------------------------------------- first-run diagnostic -- */

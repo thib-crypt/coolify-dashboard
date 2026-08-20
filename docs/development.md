@@ -46,10 +46,13 @@ The full map is in [architecture.md](architecture.md#layout). The short version:
   from environment variables.
 - `src/data/index.ts` is the single mock ↔ live switch. Components never know which one they
   are on.
+- `src/layout/Shell.tsx` is the layout route: the rail, the topbar, the toasts and the one
+  `useLiveDashboard` every page reads through `useShell()`. Pages under `src/pages/` are
+  therefore free of data plumbing — and adding one costs no new upstream traffic.
 
 ## Tests
 
-`node:test` through `tsx`, 205 of them, no network and no instance:
+`node:test` through `tsx`, 268 of them, no network and no instance:
 
 ```bash
 npm test

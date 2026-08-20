@@ -168,6 +168,68 @@ environment name; omitting it uses the first one.
   *because* a push said the data moved; a browser cache would answer that refetch from the
   copy the push just invalidated.
 
+### `GET /app/deployments?env=&skip=&take=&app=`
+
+The full history behind the overview's five-row panel. `take` is clamped to 100, `skip`
+pages through, and `app` narrows to one application's uuid.
+
+```json
+{
+  "generatedAt": "2026-08-20T10:01:04.599Z",
+  "environment": "production",
+  "total": 214, "skip": 0, "take": 50,
+  "deployments": [],
+  "notes": []
+}
+```
+
+`total` counts what Coolify knows for this environment, not the length of `deployments` —
+that is the slice asked for. Both are served from the same cached family as
+`/app/overview`, so opening the page costs nothing extra upstream.
+
+### `GET /app/applications/:uuid`
+
+One application, gathered from four Coolify calls: the application itself, its environment
+variables, its built images, and the uptime this dashboard measured.
+
+```json
+{
+  "uuid": "abc123", "name": "api-core", "domain": "api.example.com",
+  "status": { "state": "running", "health": "healthy" },
+  "repository": "acme/api", "branch": "main", "buildPack": "nixpacks",
+  "autoDeploy": true, "uptime": "99.98 %", "environment": "production",
+  "serverName": "hetzner-fsn1", "link": "https://coolify.example.com/project/…",
+  "envs": [{ "key": "NODE_ENV", "value": "production", "writeOnly": false,
+             "buildTime": true, "preview": false }],
+  "rollback": { "current": "a1f4c92",
+                "targets": [{ "tag": "9d2b710", "createdAt": "…", "current": false }] },
+  "notes": []
+}
+```
+
+Two things about `envs`, both Coolify's behaviour rather than ours:
+
+- **`value: null` means the token may not read it.** Without `read:sensitive`, Coolify
+  omits the field rather than masking it — so there is nothing to display, and nothing was
+  hidden from *you*, only from the token. The UI says which.
+- **`writeOnly: true` means nobody can read it back**, Coolify's own UI included. It is
+  shown once, at creation.
+
+`rollback.targets` are images already built and sitting on the server. `current` is the one
+the running container came from, and it is never offered as a target.
+
+### `GET /app/applications/:uuid/logs?lines=200`
+
+The container's stdout, newest last. `lines` is clamped to `[1, 500]`.
+
+```json
+{ "lines": ["2026-08-20T12:04:12Z listening on :3000"], "note": null }
+```
+
+A stopped application is not an error here: Coolify answers `400 Application is not
+running.`, which becomes `{ "lines": [], "note": "…" }`. Asking for the logs of something
+that is down is a reasonable thing to do, and a red banner would be the wrong answer.
+
 ### `GET /app/events` (SSE)
 
 One `text/event-stream` per tab. Every frame is an unnamed `message` whose `data` is one
@@ -212,7 +274,12 @@ nothing**:
 | `POST /app/deployments/:uuid/cancel` | — | `POST /api/v1/deployments/{uuid}/cancel` |
 | `POST /app/applications/:uuid/autodeploy` | `{ "enabled": true }` | `PATCH /api/v1/applications/{uuid}` |
 | `POST /app/applications/:uuid/start\|restart\|stop` | — | the matching Coolify action |
+| `POST /app/applications/:uuid/rollback` | `{ "commit": "9d2b710" }` | `POST /api/v1/applications/{uuid}/rollback` |
 | `POST /app/applications\|services/:uuid/tasks/:task/run` | — | `POST …/scheduled-tasks/{task}/execute` |
+
+`commit` on the rollback route is an image tag from `rollback.targets`, and the only field
+that endpoint accepts — an extra one is a `422`. It behaves like `/deploy` except when the
+queue is full, where Coolify answers `400` rather than `429`; both become `queue_full` here.
 
 Every write invalidates the cache entries its read counterpart filled — deployments after a
 deploy, the application detail after a toggle — so the effect of a click is visible on the

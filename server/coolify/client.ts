@@ -45,6 +45,11 @@ export class CoolifyError extends Error {
  */
 export function classify(status: number, message: string): CoolifyErrorCode {
   const text = message.toLowerCase()
+  // A full deployment queue is a 429 from `/deploy` and a 400 from `/rollback`,
+  // with the same sentence underneath both. The sentence is the reliable half —
+  // and it is worth catching, because `queue_full` is the one 4xx that tells the
+  // caller to simply try again in a minute.
+  if (text.includes('queue is full')) return 'queue_full'
   if (status === 401) return 'unauthorized'
   if (status === 400) return text.includes('invalid token') ? 'unauthorized' : 'bad_request'
   if (status === 403) {
@@ -54,8 +59,8 @@ export function classify(status: number, message: string): CoolifyErrorCode {
   }
   if (status === 404) return 'not_found'
   // Both the rate limiter and a full deployment queue answer 429 with
-  // `Retry-After`; only the body tells them apart (helpers/applications.php).
-  if (status === 429) return text.includes('queue is full') ? 'queue_full' : 'rate_limited'
+  // `Retry-After` (helpers/applications.php); the queue is caught above.
+  if (status === 429) return 'rate_limited'
   return 'http'
 }
 
@@ -84,6 +89,16 @@ export interface CoolifyClient {
   deployment(uuid: string): Promise<Api.ApplicationDeploymentQueue>
   applicationDeployments(uuid: string, take: number): Promise<Api.ApplicationDeploymentsPage>
   applicationScheduledTasks(uuid: string): Promise<Api.ScheduledTask[]>
+  /** `value` is *absent*, not redacted, without `read:sensitive` + an admin role. */
+  applicationEnvs(uuid: string): Promise<Api.EnvironmentVariable[]>
+  /**
+   * Runtime container logs. **400 `Application is not running.`** whenever the
+   * container is stopped, which is a state and not a failure — the caller is
+   * expected to say so rather than to report an error.
+   */
+  applicationLogs(uuid: string, lines: number): Promise<Api.ApplicationLogsResponse>
+  /** Images already on the server, newest first, with the running one flagged. */
+  rollbackImages(uuid: string): Promise<Api.RollbackImagesResponse>
   services(): Promise<Api.Service[]>
   serviceScheduledTasks(uuid: string): Promise<Api.ScheduledTask[]>
   /** each database carries `backup_configs` with their `latest_log` */
@@ -100,6 +115,13 @@ export interface CoolifyClient {
   /** `start` and `restart` queue a deployment; `stop` acts immediately. */
   applicationAction(uuid: string, action: ApplicationAction): Promise<Api.StartApplicationResponse>
   patchApplication(uuid: string, body: Api.PatchApplicationBody): Promise<void>
+  /**
+   * Redeploys a tag that is already built. `commit` is the *tag* from
+   * `rollbackImages`, and it is the only field the endpoint accepts — an extra
+   * one is a 422. Like `/deploy`, a skipped rollback answers 200 with a message
+   * and no `deployment_uuid`; unlike it, a full queue answers **400**, not 429.
+   */
+  rollback(uuid: string, commit: string): Promise<Api.RollbackResponse>
   runScheduledTask(owner: TaskOwner, ownerUuid: string, taskUuid: string): Promise<Api.MessageResponse>
 
   /* --- diagnostics (phase 7) -------------------------------------------- */
@@ -251,6 +273,19 @@ export function createCoolifyClient(config: ConfiguredBffConfig): CoolifyClient 
       getJson<Api.ApplicationDeploymentsPage>(
         `/deployments/applications/${encodeURIComponent(uuid)}?skip=0&take=${take}`,
       ),
+    applicationEnvs: uuid => getArray<Api.EnvironmentVariable>(`/applications/${encodeURIComponent(uuid)}/envs`),
+    applicationLogs: (uuid, lines) =>
+      getJson<Api.ApplicationLogsResponse>(
+        `/applications/${encodeURIComponent(uuid)}/logs?lines=${encodeURIComponent(String(lines))}`,
+      ),
+    rollbackImages: uuid =>
+      getJson<Api.RollbackImagesResponse>(`/applications/${encodeURIComponent(uuid)}/rollback-images`),
+    rollback: (uuid, commit) =>
+      getJson<Api.RollbackResponse>(`/applications/${encodeURIComponent(uuid)}/rollback`, {
+        method: 'POST',
+        body: { commit },
+      }),
+
     applicationScheduledTasks: uuid =>
       getArray<Api.ScheduledTask>(`/applications/${encodeURIComponent(uuid)}/scheduled-tasks`),
     services: () => getArray<Api.Service>('/services'),

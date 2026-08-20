@@ -234,6 +234,71 @@ export const mockSource: DataSource = {
     return { outcome: 'queued', message: 'Scheduled task execution queued.' }
   },
 
+  // The pages that fetch for themselves, answered from the same fixtures so the
+  // whole UI can be worked on with `npm run dev:mock` and no instance at all.
+  async getDeployments({ env, skip = 0, take = 50, application }) {
+    const rows = dashboard.deployments.filter(
+      deployment => !application || deployment.app === application,
+    )
+    return {
+      generatedAt: new Date().toISOString(),
+      environment: env ?? dashboard.environment,
+      total: rows.length,
+      skip,
+      take,
+      deployments: structuredClone(rows).slice(skip, skip + take),
+      notes: [],
+    }
+  },
+
+  async getApplication(uuid: string) {
+    const app = dashboard.applications.find(entry => entry.id === uuid) ?? dashboard.applications[0]
+    return {
+      generatedAt: new Date().toISOString(),
+      uuid,
+      name: app?.name ?? uuid,
+      description: 'A fixture, not a real application.',
+      domain: app?.domain ?? '',
+      status: { state: 'running', health: 'healthy' },
+      repository: 'orbit/api-core',
+      branch: 'main',
+      buildPack: 'nixpacks',
+      autoDeploy: app?.autoDeploy ?? null,
+      uptime: app?.uptime ?? null,
+      link: null,
+      environment: dashboard.environment,
+      serverName: dashboard.servers[0]?.name ?? null,
+      envs: [
+        { key: 'NODE_ENV', value: 'production', writeOnly: false, buildTime: true, preview: false },
+        { key: 'DATABASE_URL', value: null, writeOnly: false, buildTime: false, preview: false },
+        { key: 'SESSION_SECRET', value: null, writeOnly: true, buildTime: false, preview: false },
+      ],
+      rollback: {
+        current: 'a1f4c92',
+        targets: [
+          { tag: 'a1f4c92', createdAt: '2026-08-20 12:04:11 +0000 UTC', current: true },
+          { tag: '9d2b710', createdAt: '2026-08-19 17:41:02 +0000 UTC', current: false },
+        ],
+      },
+      notes: [],
+    }
+  },
+
+  async getApplicationLogs() {
+    return {
+      lines: [
+        '2026-08-20T12:04:12Z listening on :3000',
+        '2026-08-20T12:04:12Z connected to postgres',
+        '2026-08-20T12:09:44Z GET /health 200 1ms',
+      ],
+      note: null,
+    }
+  },
+
+  async rollback() {
+    return { outcome: 'queued', message: 'Rollback deployment queued.', deploymentUuid: 'mock-rollback' }
+  },
+
   // A plausible report, so the screen can be worked on without an instance:
   // one thing to fix, one thing switched off, one that could not be determined.
   async getSetup() {

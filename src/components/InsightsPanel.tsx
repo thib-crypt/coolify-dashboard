@@ -14,7 +14,6 @@ const SEVERITY: Record<Insight['severity'], string> = {
 interface Props {
   insights: Insight[]
   index?: number
-  onAction: (label: string) => void
 }
 
 /**
@@ -22,7 +21,7 @@ interface Props {
  * Coolify's own UI (`href`), because a button that only acknowledges a problem
  * is not an action. The all-clear row has nowhere to go and keeps the callback.
  */
-export function InsightsPanel({ insights, index, onAction }: Props) {
+export function InsightsPanel({ insights, index }: Props) {
   return (
     <Panel title="Insights" label="Insights" count={insights.length} index={index}>
       {insights.map(ins => (
@@ -42,9 +41,8 @@ export function InsightsPanel({ insights, index, onAction }: Props) {
                 {ins.action}<IconChevron />
               </a>
             ) : (
-              <button className="act" onClick={() => onAction(ins.action)}>
-                {ins.action}<IconChevron />
-              </button>
+              // Nowhere to go: the all-clear row states the fact and stops there.
+              <span className="act act--inert">{ins.action}</span>
             )}
           </div>
         </div>

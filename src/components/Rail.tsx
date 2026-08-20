@@ -1,37 +1,53 @@
 import { useEffect, useRef, type ComponentType, type SVGProps } from 'react'
+import { NavLink } from 'react-router'
 import {
-  IconActivity, IconApps, IconDatabases, IconOverview, IconServers, IconSettings, LogoMark,
+  IconActivity, IconApps, IconCalendar, IconOverview, IconServers, IconSettings, LogoMark,
 } from './icons'
 import './Rail.css'
 
 interface RailItem {
-  id: string
+  to: string
   label: string
   Icon: ComponentType<SVGProps<SVGSVGElement>>
+  /** `/` matches everything, so only the root needs the exact rule */
+  end?: boolean
 }
 
+/**
+ * Databases had an icon here before there was a page behind it. Rather than a
+ * button that does nothing, the rail now lists exactly what exists — and
+ * `Schedule` replaces it, because the schedule is data the dashboard already
+ * computes and had nowhere to show in full.
+ */
 const TOP: RailItem[] = [
-  { id: 'overview', label: 'Overview', Icon: IconOverview },
-  { id: 'applications', label: 'Applications', Icon: IconApps },
-  { id: 'servers', label: 'Servers', Icon: IconServers },
-  { id: 'databases', label: 'Databases', Icon: IconDatabases },
-  { id: 'activity', label: 'Activity', Icon: IconActivity },
+  { to: '/', label: 'Overview', Icon: IconOverview, end: true },
+  { to: '/applications', label: 'Applications', Icon: IconApps },
+  { to: '/servers', label: 'Servers', Icon: IconServers },
+  { to: '/deployments', label: 'Deployments', Icon: IconActivity },
+  { to: '/schedule', label: 'Schedule', Icon: IconCalendar },
 ]
 
-const BOTTOM: RailItem[] = [{ id: 'settings', label: 'Settings', Icon: IconSettings }]
+const BOTTOM: RailItem[] = [{ to: '/setup', label: 'Setup check', Icon: IconSettings }]
 
-function RailButton({ item, current }: { item: RailItem; current: boolean }) {
-  const { Icon, label } = item
+function RailButton({ item }: { item: RailItem }) {
+  const { Icon, label, to, end } = item
   return (
-    <button className="rail-btn" aria-current={current ? 'page' : undefined} aria-label={label}>
+    <NavLink
+      to={to}
+      end={end ?? false}
+      className="rail-btn"
+      aria-label={label}
+      // `aria-current="page"` is what the stylesheet has always keyed on; NavLink
+      // sets it itself, so the active state needed no new CSS.
+    >
       <Icon />
       <span className="tip" role="tooltip">{label}</span>
-    </button>
+    </NavLink>
   )
 }
 
 /** Tooltips wait 450 ms on the first hover, then stay instant while the rail is "warm". */
-export function Rail({ current = 'overview' }: { current?: string }) {
+export function Rail() {
   const rail = useRef<HTMLElement>(null)
 
   useEffect(() => {
@@ -64,9 +80,9 @@ export function Rail({ current = 'overview' }: { current?: string }) {
   return (
     <aside className="rail" ref={rail} aria-label="Navigation">
       <div className="logo" aria-hidden="true"><LogoMark /></div>
-      {TOP.map(item => <RailButton key={item.id} item={item} current={item.id === current} />)}
+      {TOP.map(item => <RailButton key={item.to} item={item} />)}
       <div className="spacer" />
-      {BOTTOM.map(item => <RailButton key={item.id} item={item} current={item.id === current} />)}
+      {BOTTOM.map(item => <RailButton key={item.to} item={item} />)}
     </aside>
   )
 }

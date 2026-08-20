@@ -7,6 +7,20 @@ this project follows [semantic versioning](https://semver.org/) from 1.0.0 onwar
 
 ### Added
 
+- **Pages behind the rail.** `react-router`, with `/applications`, `/applications/:uuid`,
+  `/deployments`, `/servers`, `/schedule` and `/setup`; a layout route holds the one live
+  channel, so a page change costs no upstream requests and the SSE stream survives it. Every
+  panel's *View all* now goes somewhere, and a deep link into any of them survives a reload.
+- **An application page**, with everything the overview has no room for: runtime logs
+  (`GET /app/applications/:uuid/logs`), environment variables, its own deployment history,
+  and **rollback** to an image already built on the server
+  (`POST /app/applications/:uuid/rollback`). A stopped container answers with an empty log
+  and the reason rather than an error, a variable the token may not read is labelled as
+  withheld rather than masked, and the running image is never offered as a rollback target.
+- **The full deployment history**, at `GET /app/deployments?env&skip&take&app` — assembled
+  from each application's own history, because Coolify's `/deployments` returns only what is
+  queued or running.
+
 - **A password on the dashboard itself.** `DASHBOARD_PASSWORD` is exchanged once at
   `POST /app/session` for an `HttpOnly`, `SameSite=Lax` cookie carrying a signed expiry —
   no server-side session store, so a restart signs nobody out. Ten failed attempts shut the
@@ -37,6 +51,13 @@ this project follows [semantic versioning](https://semver.org/) from 1.0.0 onwar
 ### Changed
 
 - `npm run build` now type-checks and builds both halves; `npm start` runs the built server.
+
+### Fixed
+
+- **A full deployment queue is recognised on a rollback.** Coolify answers `429` for a
+  deploy and `400` for a rollback with the same sentence underneath; both are now
+  `queue_full` — the one 4xx that means "just try again in a minute" — instead of the
+  rollback surfacing as a generic invalid state.
 
 ## Earlier work
 

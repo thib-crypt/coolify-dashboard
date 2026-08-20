@@ -10,7 +10,8 @@
   display:grid;place-items:center;font-size:11.5px;font-weight:600;color:#fff;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 1px 2px rgba(16,24,40,.14);
 }
-.approw .id{min-width:0;flex:1}
+.approw .id{min-width:0;flex:1;color:inherit;text-decoration:none;display:block}
+@media (hover:hover) and (pointer:fine){.approw .id:hover .an{color:var(--accent)}}
 .approw .an{font-weight:550;letter-spacing:-.01em}
 .approw .ad{font-size:11.5px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .approw .up{font:11.5px var(--mono);color:var(--t2)}

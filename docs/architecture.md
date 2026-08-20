@@ -39,7 +39,14 @@ src/                      React SPA
 │   ├── coolify.ts        live adapter: GET /app/overview + SSE /app/events
 │   └── index.ts          the single mock ↔ live switch
 ├── hooks/
-│   └── useLiveDashboard.ts   payload + live channel + polling fallback
+│   ├── useLiveDashboard.ts   payload + live channel + polling fallback
+│   ├── useActions.ts         every write, with its toast and its refetch
+│   ├── useSession.ts         the password gate, when there is a password
+│   └── useDocumentTitle.ts   the tab title follows the route
+├── layout/
+│   ├── Shell.tsx         the layout route: rail, topbar, palette, one live channel
+│   └── context.ts        what pages read through `useShell()`
+├── pages/                one file per route, no data plumbing of their own
 └── components/           one CSS file per component, media queries beside their rule
 
 shared/                   imported by both sides
@@ -53,7 +60,10 @@ server/                   BFF (Hono)
 ├── coolify/
 │   ├── client.ts         typed fetch: Bearer, error classification, verb fallbacks
 │   └── mappers.ts        pure functions, Coolify API → Dashboard
-├── overview.ts           the aggregator: ~10 endpoints → one Dashboard + degraded notes
+├── auth.ts               the password gate: signed cookie, no session store
+├── setup.ts              the first-run diagnostic behind GET /app/setup
+├── overview.ts           the aggregator: ~10 endpoints → one Dashboard, plus the
+│                         per-resource reads the pages need
 ├── actions.ts            writes: reads what Coolify *actually* did, purges the cache
 ├── cache.ts              per-family TTL cache: single-flight + stale-on-upstream-failure
 ├── concurrency.ts        mapLimit: bounds the fan-outs (one call per app, per server)
@@ -89,6 +99,26 @@ collected in [coolify-api-notes.md](coolify-api-notes.md).
 6. If Coolify goes down mid-refresh, the cache serves its last known value rather than an
    error — a dashboard that goes blank the moment the instance hiccups is worse than one
    that says "as of two minutes ago".
+
+## Pages, and why navigating is free
+
+`react-router` in declarative mode, with one **layout route** — `src/layout/Shell.tsx` —
+holding the rail, the topbar, the command palette, the toasts, and the single
+`useLiveDashboard`. Pages are children of it and read what they need through `useShell()`.
+
+That shape is the whole point: the SSE stream is opened once and survives navigation, and a
+page change issues **no upstream request at all**. The reads that pages do add
+(`/app/deployments`, `/app/applications/:uuid`) hit the same cache families the aggregator
+already fills, so the rate-limit budget is a function of time and of the fleet's size —
+never of how much someone clicks.
+
+Two consequences worth knowing:
+
+- **The environment is a shell-level value**, so every scoped read has to carry it. The
+  history and application pages pass `env`; without it the BFF would answer for the team's
+  first environment while the topbar showed another.
+- **`<Outlet key={data.environment}>`**: switching environments replaces the data
+  underneath, so panels replay their entrance rather than mutating in place.
 
 ## The live channel
 

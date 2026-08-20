@@ -16,6 +16,11 @@ import type {
   SessionResponse,
   SetupReport,
 } from './types'
+import type {
+  ApplicationDetailResponse,
+  ApplicationLogsResponse,
+  DeploymentHistoryResponse,
+} from '@shared/bff'
 import type { BffErrorResponse, LiveEvent, OverviewResponse } from '@shared/bff'
 
 async function readError(res: Response): Promise<DashboardError> {
@@ -133,6 +138,31 @@ export function createBffSource(basePath = '/app'): DataSource {
     stopApplication: appId => act(`${app(appId)}/stop`),
     runScheduledTask: (owner, ownerId, taskId) =>
       act(`/${owner}s/${encodeURIComponent(ownerId)}/tasks/${encodeURIComponent(taskId)}/run`),
+
+    async getDeployments({ env, skip = 0, take = 50, application }) {
+      const query = new URLSearchParams({ skip: String(skip), take: String(take) })
+      // Without it the BFF answers for the team's first environment, which is
+      // not necessarily the one the topbar is showing.
+      if (env) query.set('env', env)
+      if (application) query.set('app', application)
+      const res = await call(`/deployments?${query.toString()}`)
+      if (!res.ok) throw await readError(res)
+      return (await res.json()) as DeploymentHistoryResponse
+    },
+
+    async getApplication(uuid) {
+      const res = await call(app(uuid))
+      if (!res.ok) throw await readError(res)
+      return (await res.json()) as ApplicationDetailResponse
+    },
+
+    async getApplicationLogs(uuid, lines = 200) {
+      const res = await call(`${app(uuid)}/logs?lines=${lines}`)
+      if (!res.ok) throw await readError(res)
+      return (await res.json()) as ApplicationLogsResponse
+    },
+
+    rollback: (uuid, commit) => act(`${app(uuid)}/rollback`, { commit }),
 
     async getSetup() {
       const res = await call('/setup')

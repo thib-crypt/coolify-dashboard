@@ -40,7 +40,7 @@
   font:11px var(--mono);color:var(--t2);background:var(--surface);
   border:1px solid var(--line-2);border-radius:99px;padding:1px 7px;
 }
-.panel-head .more{margin-left:auto;font-size:12.5px;font-weight:500;color:var(--t2);display:flex;align-items:center;gap:3px;border-radius:6px;transition:color 150ms ease}
+.panel-head .more{margin-left:auto;text-decoration:none;font-size:12.5px;font-weight:500;color:var(--t2);display:flex;align-items:center;gap:3px;border-radius:6px;transition:color 150ms ease}
 .panel-head .more svg{width:11px;height:11px;transition:transform 150ms var(--ease-out)}
 @media (hover:hover) and (pointer:fine){
   .panel-head .more:hover{color:var(--accent)}

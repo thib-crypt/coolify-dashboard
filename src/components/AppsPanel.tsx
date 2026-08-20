@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router'
 import type { Application } from '../data'
 import { Panel } from './Panel'
 import './AppsPanel.css'
@@ -9,10 +10,9 @@ interface Props {
   index?: number
   /** rejecting reverts the optimistic flip */
   onToggle: (app: Application, enabled: boolean) => void | Promise<unknown>
-  onViewAll: (label: string) => void
 }
 
-export function AppsPanel({ applications: initial, count, index, onToggle, onViewAll }: Props) {
+export function AppsPanel({ applications: initial, count, index, onToggle }: Props) {
   const [apps, setApps] = useState(initial)
 
   // The local copy only exists to flip a toggle before the server has answered.
@@ -41,15 +41,15 @@ export function AppsPanel({ applications: initial, count, index, onToggle, onVie
       label="Applications"
       count={count}
       index={index}
-      more={{ label: 'View all', onClick: onViewAll }}
+      more={{ label: 'View all', to: '/applications' }}
     >
       {apps.map(app => (
         <div className="approw" key={app.id}>
           <span className="appic" style={{ background: app.gradient }}>{app.initial}</span>
-          <div className="id">
+          <Link className="id" to={`/applications/${encodeURIComponent(app.id)}`}>
             <div className="an">{app.name}</div>
             <div className="ad">{app.domain}</div>
-          </div>
+          </Link>
           <span className="up" title={app.uptime ? 'Measured by this dashboard over the last 24 h' : 'Not probed — no public domain, or probing is off'}>
             {app.uptime ?? '—'}
           </span>

@@ -1,7 +1,7 @@
 # Roadmap
 
-Where the project is, what was decided along the way, and what is left. Phases 0–5 are
-done; the two that remain are the ones that turn a working dashboard into a product.
+Where the project is, what was decided along the way, and what is left. Phases 0–6 are
+done, and phase 7 is done except for two data sources that Coolify itself does not expose.
 
 The analysis this plan rests on was done against the Coolify **v4.3.9** source and its
 docs, targeting a **v4.3.2** instance. The API traps it turned up live in
@@ -15,8 +15,8 @@ docs, targeting a **v4.3.2** instance. The API traps it turned up live in
 | 3 | Real time: SSE, adaptive poller, incoming webhooks | ✅ Done |
 | 4 | Measured uptime, latency, TLS expiry, insight engine | ✅ Done |
 | 5 | Server metrics through Sentinel over SSH | ✅ Done |
-| 6 | Navigation and per-resource pages | ⬜ Next |
-| 7 | Packaging, authentication, one-click install | 🟨 Partly done |
+| 6 | Navigation and per-resource pages | ✅ Done |
+| 7 | Packaging, authentication, one-click install | 🟨 Mostly done |
 
 ## The framing decision
 
@@ -101,23 +101,44 @@ same guards as `ServerSentinelController` (`api.ability:read` + `read:sensitive`
 unnecessary — for this dashboard and for everyone else building against Coolify. It is a
 patch on Coolify, not on this repository, which is why it is listed here rather than shipped.
 
-## Next
-
 ### Phase 6 — Navigation and pages
 
-Today the rail does not navigate: there is one page, and `aria-current` stays on Overview.
-This is the first real addition.
+The rail navigates. `react-router` in declarative mode, one layout route holding the single
+`useLiveDashboard`, and six pages under it: `/`, `/applications`, `/applications/:uuid`,
+`/deployments`, `/servers`, `/schedule`, plus `/setup` and a 404 that says so.
 
-- `react-router`, with `/`, `/applications`, `/applications/:uuid`, `/deployments`,
-  `/servers/:uuid`, `/schedule`; the rail's active state is already styled.
-- An application page: runtime logs (`GET /applications/{uuid}/logs`, which `400`s when the
-  container is stopped), environment variables (masked without `read:sensitive`), paginated
-  deployment history, and rollback (`GET …/rollback-images` + `POST …/rollback`).
-- The environment selector becomes a real cross-cutting filter, mapped from `environment_id`.
+**One live channel for the whole application.** The SSE stream and the poller live in the
+layout route, not in the pages, so navigating costs *zero* upstream requests and the
+environment switch survives a page change. The new reads share cache families with
+`/app/overview` — the budget in [appendix B](#appendix-b--the-rate-limit-budget) is
+unchanged by any amount of clicking around.
+
+**The application page** is the one that needed new endpoints: runtime logs, environment
+variables, deployment history and rollback. Three things it had to get right, all of them
+Coolify's behaviour rather than ours:
+
+- **A stopped container is a state, not an error.** `GET /applications/{uuid}/logs` answers
+  `400 Application is not running.`; the page shows an empty log with that sentence, because
+  asking a down service for its logs is a reasonable thing to do.
+- **A withheld environment variable is not a masked one.** Without `read:sensitive`, Coolify
+  *omits* `value` rather than starring it out, and a write-only variable is one Coolify
+  itself cannot read back. Those are two different sentences on screen, not one `••••••`.
+- **Rollback targets are images, not commits.** `GET …/rollback-images` lists what is already
+  built and sitting on the server; the running one is marked and never offered.
+
+**`/servers` is a page, not `/servers/:uuid`.** The plan said otherwise. A server detail page
+would hold the same five numbers the fleet card already shows — Coolify exposes no per-server
+history to fill it with — so the list carries them and the deep link goes to Coolify.
+
+**The environment selector is cross-cutting**, and every scoped read carries it: the history
+page and the application page both pass `env`, or the BFF would answer for the team's first
+environment while the topbar showed another.
+
+## Next
 
 ### Phase 7 — Packaging and plugability
 
-Partly done. The container exists and is documented in [deployment.md](deployment.md), and
+Mostly done. The container exists and is documented in [deployment.md](deployment.md), and
 **the dashboard now has a front door**: `DASHBOARD_PASSWORD` is exchanged once at
 `POST /app/session` for an `HttpOnly` cookie carrying a signed expiry — no session store, so
 a restart signs nobody out, and the key derives from the password so that changing it does.

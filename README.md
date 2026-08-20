@@ -84,6 +84,12 @@ round trip. Give it nothing — the default — and the gauges stay empty while 
 silence they are: no collector, Sentinel disabled on that server, a reading gone stale, or a
 collector that tried and failed.
 
+**Pages, not one screen.** The overview is a summary; every panel's *View all* opens the
+full thing — applications, the whole deployment history, servers, the next 24 hours of
+scheduled work. An application has its own page: runtime logs, environment variables,
+deployment history and one-click rollback to an image already built on the server. All of
+it shares a single live channel, so navigating costs no extra Coolify requests.
+
 **The design.** Command palette, animated KPI sparklines, staggered entrances, delayed rail
 tooltips, `prefers-reduced-motion` support, and breakpoints at 1020 / 680 px.
 
@@ -135,7 +141,7 @@ Other scripts:
 |---|---|
 | `npm run dev` | SPA + BFF together, both watching |
 | `npm run dev:mock` | SPA alone on fixture data — no instance, no token needed |
-| `npm test` | 245 unit tests (mappers, cache, client, actions, hub, poller, webhooks, probes, metrics, auth, setup, static) |
+| `npm test` | 268 unit tests (mappers, cache, client, actions, aggregator, hub, poller, webhooks, probes, metrics, auth, setup, static) |
 | `npm run typecheck` | Both TypeScript projects |
 | `npm run build` | Type-check, bundle the SPA into `dist/` and the BFF into `dist-server/` |
 | `npm start` | Run the built server, which then serves the built SPA too |

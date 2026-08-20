@@ -65,6 +65,24 @@ export function readApplicationAction(
     : { outcome: 'skipped', message }
 }
 
+/**
+ * Reads `POST /applications/{uuid}/rollback`.
+ *
+ * Same 200-means-nothing trap as `/deploy` — a skipped rollback answers 200 with
+ * a message and no `deployment_uuid`. Different in one place worth remembering:
+ * a full deployment queue here is a **400**, not the 429 the deploy route uses,
+ * so it arrives as `bad_request` and its message is the only thing that says so.
+ */
+export function readRollbackResponse(body: Api.RollbackResponse): ActionResponse {
+  const message = body.message ?? 'Coolify accepted the request.'
+  if (REFUSED.test(message)) {
+    throw new CoolifyError(message, { code: 'forbidden', status: 200, path: '/rollback' })
+  }
+  return body.deployment_uuid
+    ? { outcome: 'queued', message, deploymentUuid: body.deployment_uuid }
+    : { outcome: 'skipped', message }
+}
+
 export interface ActionDeps {
   client: CoolifyClient
   cache: TtlCache
@@ -76,6 +94,8 @@ export interface ActionService {
   applicationAction(uuid: string, action: ApplicationAction): Promise<ActionResponse>
   setAutoDeploy(uuid: string, enabled: boolean): Promise<ActionResponse>
   runScheduledTask(owner: TaskOwner, ownerUuid: string, taskUuid: string): Promise<ActionResponse>
+  /** Redeploys an image already on the server; `commit` is its tag. */
+  rollback(uuid: string, commit: string): Promise<ActionResponse>
 }
 
 export function createActionService({ client, cache }: ActionDeps): ActionService {
@@ -86,6 +106,14 @@ export function createActionService({ client, cache }: ActionDeps): ActionServic
     async deploy(uuid, options) {
       const result = readDeployResponse(await client.deploy(uuid, options))
       forgetDeployments()
+      return result
+    },
+
+    async rollback(uuid, commit) {
+      const result = readRollbackResponse(await client.rollback(uuid, commit))
+      forgetDeployments()
+      // The running image changes, and with it which target is `current`.
+      cache.invalidate(`rollback:${uuid}`)
       return result
     },
 

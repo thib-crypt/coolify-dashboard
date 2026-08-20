@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { createActionService, readApplicationAction, readDeployResponse } from './actions'
+import {
+  createActionService,
+  readApplicationAction,
+  readDeployResponse,
+  readRollbackResponse,
+} from './actions'
 import { TtlCache } from './cache'
 import { CoolifyError, type CoolifyClient } from './coolify/client'
 
@@ -52,6 +57,28 @@ describe('readDeployResponse', () => {
   })
 })
 
+describe('readRollbackResponse', () => {
+  it('reports a queued rollback with the deployment to follow', () => {
+    assert.deepEqual(
+      readRollbackResponse({ message: 'Rollback deployment queued.', deployment_uuid: 'd9' }),
+      { outcome: 'queued', message: 'Rollback deployment queued.', deploymentUuid: 'd9' },
+    )
+  })
+
+  it('does not celebrate a skip — the same 200-means-nothing trap as /deploy', () => {
+    const result = readRollbackResponse({ message: 'Deployment already queued for this commit.' })
+    assert.equal(result.outcome, 'skipped')
+    assert.equal(result.deploymentUuid, undefined)
+  })
+
+  it('turns a 200-with-refusal into a permission error', () => {
+    assert.throws(
+      () => readRollbackResponse({ message: 'Unauthorized to deploy this application.' }),
+      (error: unknown) => error instanceof CoolifyError && error.code === 'forbidden',
+    )
+  })
+})
+
 describe('readApplicationAction', () => {
   it('queues when start/restart answered with a deployment', () => {
     assert.deepEqual(readApplicationAction({ message: 'Restart request queued.', deployment_uuid: 'd2' }, true), {
@@ -92,6 +119,24 @@ describe('createActionService', () => {
     await cache.fetch('deployments:running', 60_000, load)
     await cache.fetch('deployments:app-1', 60_000, load)
     assert.equal(loads, 4, 'both deployment entries should have been reloaded')
+  })
+
+  it('drops the rollback list too — the running image is what just changed', async () => {
+    const cache = new TtlCache()
+    let loads = 0
+    const load = async () => ++loads
+    await cache.fetch('rollback:app-1', 60_000, load)
+
+    const service = createActionService({
+      cache,
+      client: stubClient({
+        rollback: async () => ({ message: 'Rollback deployment queued.', deployment_uuid: 'd2' }),
+      }),
+    })
+
+    assert.equal((await service.rollback('app-1', '9d2b710')).outcome, 'queued')
+    await cache.fetch('rollback:app-1', 60_000, load)
+    assert.equal(loads, 2, 'the rollback targets should have been reloaded')
   })
 
   it('drops the cached application detail the auto-deploy toggle reads back', async () => {

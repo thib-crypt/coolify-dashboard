@@ -8,7 +8,16 @@
  * servers, without which there is no dashboard to show.
  */
 
-import type { DegradedNote, HealthResponse, OverviewResponse } from '../shared/bff'
+import type {
+  AppEnvVar,
+  ApplicationDetailResponse,
+  ApplicationLogsResponse,
+  DegradedNote,
+  DeploymentHistoryResponse,
+  HealthResponse,
+  OverviewResponse,
+  RollbackTarget,
+} from '../shared/bff'
 import type { Dashboard } from '../shared/dashboard'
 import type * as Api from '../shared/coolify-api'
 import { TTL, type TtlCache } from './cache'
@@ -21,6 +30,7 @@ import type { SignalStore } from './signals'
 import {
   DAY_MS,
   DOWN_AFTER_FAILURES,
+  bareDomain,
   buildFleetTotals,
   buildInsights,
   buildKpis,
@@ -66,8 +76,26 @@ export interface OverviewDeps {
   now?: () => number
 }
 
+export interface HistoryQuery {
+  env: string | null
+  skip: number
+  take: number
+  /** one application's history rather than the environment's, by uuid */
+  application?: string | undefined
+}
+
 export interface OverviewService {
   build(requestedEnv: string | null): Promise<OverviewResponse>
+  /**
+   * The full deployment history of an environment, or of one application.
+   * Reads through the same cache keys as `build`, so opening the page costs
+   * nothing upstream while the overview's entries are still warm.
+   */
+  history(query: HistoryQuery): Promise<DeploymentHistoryResponse>
+  /** One application, with what only its own page needs: envs and rollback targets. */
+  detail(uuid: string): Promise<ApplicationDetailResponse>
+  /** Runtime container logs. A stopped container is a state, not an error. */
+  logs(uuid: string, lines: number): Promise<ApplicationLogsResponse>
   /** `live`, `probes` and `metrics` are the route's to add — the aggregator owns none. */
   health(): Promise<Omit<HealthResponse, 'auth' | 'live' | 'probes' | 'metrics'>>
 }
@@ -134,10 +162,14 @@ export function createOverviewService(deps: OverviewDeps): OverviewService {
     return (await cache.fetch(key, ttl, loader)).value
   }
 
-  async function build(requestedEnv: string | null): Promise<OverviewResponse> {
-    const now = clock()
-    const notes: DegradedNote[] = []
-
+  /**
+   * The part every page-level read needs before it can say anything: who the
+   * team is, which environments exist, which one is selected, and what belongs
+   * to it. Extracted because the deployment history needs exactly this and
+   * nothing else — and, going through the same cache keys, needs no upstream
+   * request of its own once the overview has been built.
+   */
+  async function resolveScope(requestedEnv: string | null, notes: DegradedNote[]) {
     const [team, projects, applications, servers] = await Promise.all([
       optional('team', 'team', TTL.team, () => client.team(), null as Api.Team | null, notes),
       optional('projects', 'environments', TTL.projects, () => client.projects(), [] as Api.Project[], notes),
@@ -187,6 +219,34 @@ export function createOverviewService(deps: OverviewDeps): OverviewService {
       canFilterByEnvironment ? items.filter(item => environmentOf(item.environment_id) === activeEnvironment) : items
 
     const envApplications = inEnvironment(applications)
+
+    return {
+      team,
+      servers,
+      applications,
+      envApplications,
+      activeEnvironment,
+      environmentNames,
+      links,
+      environmentOf,
+      inEnvironment,
+      canFilterByEnvironment,
+    }
+  }
+
+  async function build(requestedEnv: string | null): Promise<OverviewResponse> {
+    const now = clock()
+    const notes: DegradedNote[] = []
+
+    const {
+      team,
+      servers,
+      envApplications,
+      activeEnvironment,
+      environmentNames,
+      links,
+      inEnvironment,
+    } = await resolveScope(requestedEnv, notes)
 
     /* --- per-application detail: the list endpoint carries no `settings` --- */
     let detailFailures = 0
@@ -578,7 +638,207 @@ export function createOverviewService(deps: OverviewDeps): OverviewService {
     }
   }
 
-  return { build, health }
+  /**
+   * `/deployments` upstream returns only what is queued or running, so history
+   * is per application and has to be gathered and re-sorted here. Coolify pages
+   * each application separately (`skip`/`take`); this pulls `historyTake` from
+   * each and pages the merged result, which is why `total` is "known here", not
+   * "exists upstream".
+   */
+  async function history(query: HistoryQuery): Promise<DeploymentHistoryResponse> {
+    const now = clock()
+    const notes: DegradedNote[] = []
+    const { envApplications, activeEnvironment } = await resolveScope(query.env, notes)
+
+    const wanted = query.application
+      ? envApplications.filter(app => app.uuid === query.application)
+      : envApplications
+
+    if (query.application && wanted.length === 0) {
+      notes.push({
+        scope: 'deployments',
+        reason: 'That application is not in this environment — showing nothing rather than another one\'s history.',
+      })
+    }
+
+    let failures = 0
+    const histories = await mapLimit(wanted, FAN_OUT, async app => {
+      try {
+        const page = await required(`deployments:${app.uuid}`, TTL.deploymentHistory, () =>
+          client.applicationDeployments(app.uuid, historyTake),
+        )
+        return { app, deployments: Array.isArray(page?.deployments) ? page.deployments : [] }
+      } catch {
+        failures++
+        return { app, deployments: [] as Api.ApplicationDeploymentQueue[] }
+      }
+    })
+    if (failures > 0) {
+      notes.push({
+        scope: 'deployments',
+        reason: `Could not read the deployment history of ${failures} application(s).`,
+      })
+    }
+
+    const rows = histories
+      .flatMap(({ app, deployments }) =>
+        deployments.map(deployment => ({
+          deployment,
+          app,
+          at: parseApiDate(deployment.finished_at) ?? parseApiDate(deployment.created_at) ?? 0,
+        })),
+      )
+      .sort((a, b) => b.at - a.at)
+
+    const skip = Math.max(0, query.skip)
+    const take = Math.min(Math.max(1, query.take), 200)
+
+    return {
+      generatedAt: new Date(now).toISOString(),
+      environment: activeEnvironment,
+      total: rows.length,
+      skip,
+      take,
+      deployments: rows
+        .slice(skip, skip + take)
+        .map(entry =>
+          mapDeployment(entry.deployment, { branch: entry.app.git_branch, appName: entry.app.name }, now),
+        ),
+      notes: [
+        ...notes,
+        // `historyTake` per application is the ceiling on what this can ever see.
+        {
+          scope: 'deployments',
+          reason: `Built from the last ${historyTake} deployments of each application (DEPLOYMENT_HISTORY_TAKE).`,
+        },
+      ],
+    }
+  }
+
+  /**
+   * Everything about one application that the overview has no room for.
+   *
+   * The three optional reads degrade independently: environment variables need
+   * `read` and give up their *values* only with `read:sensitive`, and the
+   * rollback list shells into the server, so an unreachable one answers 200 with
+   * an empty list. None of that should stop the page from rendering the
+   * application it is about.
+   */
+  async function detail(uuid: string): Promise<ApplicationDetailResponse> {
+    const now = clock()
+    const notes: DegradedNote[] = []
+    const { servers, links, environmentOf } = await resolveScope(null, notes)
+
+    // Through the same cache key the overview fills, so opening this page while
+    // the dashboard is warm costs nothing upstream.
+    const app = await required(`application:${uuid}`, TTL.applicationDetail, () => client.application(uuid))
+
+    const [envs, rollback] = await Promise.all([
+      optional(
+        `envs:${uuid}`,
+        'envs',
+        TTL.applicationDetail,
+        () => client.applicationEnvs(uuid),
+        [] as Api.EnvironmentVariable[],
+        notes,
+      ),
+      optional(
+        `rollback:${uuid}`,
+        'rollback',
+        TTL.applicationDetail,
+        () => client.rollbackImages(uuid),
+        {} as Api.RollbackImagesResponse,
+        notes,
+      ),
+    ])
+
+    const mappedEnvs: AppEnvVar[] = envs.map(env => ({
+      key: env.key,
+      // Absent, not empty: Coolify omits the field entirely rather than
+      // redacting it, so `null` here means "not allowed to see" — and the UI
+      // must not render it as an empty string.
+      value: env.value ?? null,
+      writeOnly: env.is_shown_once === true,
+      buildTime: env.is_buildtime === true,
+      preview: env.is_preview === true,
+    }))
+
+    if (mappedEnvs.length > 0 && mappedEnvs.every(env => env.value === null && !env.writeOnly)) {
+      notes.push({
+        scope: 'envs',
+        reason: 'Coolify withheld every value — that needs a token with `read:sensitive`, owned by an admin or owner.',
+      })
+    }
+
+    const targets: RollbackTarget[] = (rollback.images ?? [])
+      .filter((image): image is Api.RollbackImage & { tag: string } => typeof image.tag === 'string' && image.tag !== '')
+      .map(image => ({
+        tag: image.tag,
+        createdAt: image.created_at ?? null,
+        current: image.is_current === true,
+      }))
+
+    if (targets.length === 0) {
+      notes.push({
+        scope: 'rollback',
+        reason:
+          'No image to roll back to. Coolify reads this with `docker images` over SSH, so an unreachable server also answers an empty list.',
+      })
+    }
+
+    const probes = probeState()
+    const probe = probes.applications.get(uuid)
+    const status = parseResourceStatus(app.status)
+    // `server_id` is the only link back; the applications list carries no server.
+    const server = servers.find(entry => entry.id !== undefined && entry.id === app.server_id)
+
+    return {
+      generatedAt: new Date(now).toISOString(),
+      uuid: app.uuid,
+      name: app.name,
+      description: app.description ?? null,
+      domain: bareDomain(app.fqdn) ?? '',
+      status: { state: status.state, health: status.health === 'unknown' ? null : status.health },
+      repository: app.git_repository ?? null,
+      branch: app.git_branch ?? null,
+      buildPack: app.build_pack ?? null,
+      autoDeploy: app.settings?.is_auto_deploy_enabled ?? null,
+      uptime: probe?.uptimePct == null ? null : formatUptime(probe.uptimePct),
+      link: links.application(app.uuid, app.environment_id),
+      environment: environmentOf(app.environment_id),
+      serverName: server?.name ?? null,
+      envs: mappedEnvs,
+      rollback: { current: rollback.current ?? null, targets },
+      notes,
+    }
+  }
+
+  /**
+   * `GET /applications/{uuid}/logs` answers **400 "Application is not running."**
+   * whenever the container is stopped. That is the ordinary state of a stopped
+   * application, not a failure, so it becomes an empty list with a sentence —
+   * the page says why it is empty instead of showing an error.
+   */
+  async function logs(uuid: string, lines: number): Promise<ApplicationLogsResponse> {
+    try {
+      const answer = await client.applicationLogs(uuid, Math.min(Math.max(1, lines), 500))
+      const text = typeof answer.logs === 'string' ? answer.logs : ''
+      const split = text.split(/\r?\n/).filter(line => line.length > 0)
+      return split.length > 0
+        ? { lines: split, note: null }
+        : { lines: [], note: 'The container is running but has written nothing yet.' }
+    } catch (error) {
+      if (error instanceof CoolifyError && error.code === 'bad_request') {
+        return { lines: [], note: error.message }
+      }
+      if (error instanceof CoolifyError && error.code === 'forbidden') {
+        return { lines: [], note: `${error.message} Reading runtime logs needs a token Coolify accepts for this application.` }
+      }
+      throw error
+    }
+  }
+
+  return { build, history, detail, logs, health }
 }
 
 /** Gaps that are structural, not transient failures. */

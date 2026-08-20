@@ -14,6 +14,8 @@
   transition:color 150ms ease,background-color 150ms ease,border-color 150ms ease,transform 140ms var(--ease-out);
 }
 .ins a.act{text-decoration:none}
+/* the all-clear row: a statement, not a control */
+.ins .act--inert{color:var(--t3);background:transparent;border-color:var(--line);box-shadow:none}
 .ins .act svg{width:11px;height:11px;color:var(--t3);transition:transform 150ms var(--ease-out)}
 .ins .act:active{transform:scale(.97)}
 @media (hover:hover) and (pointer:fine){

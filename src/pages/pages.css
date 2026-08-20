@@ -1,0 +1,118 @@
+/* ————————————————————————————— pages
+   Shared by everything the rail navigates to. The overview keeps its own
+   `.page-head` (a one-line header); these are the fuller ones, with a title,
+   a sentence of context and the page's own actions. */
+
+.page-top{display:flex;flex-direction:column;align-items:flex-start;gap:4px;margin-bottom:6px}
+.page-top h1{font-size:22px;font-weight:600;letter-spacing:-.025em;line-height:1.2}
+.page-top p{color:var(--t3);font-size:13px;line-height:1.55;max-width:70ch}
+.page-top a{color:var(--accent);text-decoration:none}
+.page-top a:hover{text-decoration:underline}
+.page-top .crumb{font-size:12px;color:var(--t3)}
+.page-top .mono{font-family:var(--mono);font-size:12px}
+.page-actions{flex-direction:row;margin-top:10px}
+
+.page-filter{
+  margin-top:10px;width:min(320px,100%);padding:7px 11px;border-radius:8px;
+  border:1px solid var(--line-2);background:var(--surface);
+  font-size:13px;color:var(--t1);
+  transition:border-color 140ms ease,box-shadow 140ms ease;
+}
+.page-filter:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+
+.page-empty{padding:18px 16px;font-size:12.5px;line-height:1.55;color:var(--t3)}
+.page-empty code{font-family:var(--mono);font-size:11.5px}
+.page-error{font-size:12.5px;color:var(--err)}
+.page-note{font-size:11.5px;line-height:1.5;color:var(--t3);padding:0 2px}
+.page-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;align-items:start}
+
+/* row buttons — quiet until hovered, because they act on production */
+.row-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.row-actions button,.row-actions a{
+  display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:7px;
+  background:var(--surface);border:1px solid var(--line-2);box-shadow:var(--sh-1);
+  font-size:12px;font-weight:500;color:var(--t1);text-decoration:none;
+  transition:background-color 150ms ease,border-color 150ms ease,color 150ms ease,transform 140ms var(--ease-out),opacity 140ms ease;
+}
+.row-actions button:active,.row-actions a:active{transform:scale(.97)}
+.row-actions button:disabled{opacity:.45;cursor:default}
+.row-actions .danger{color:var(--err)}
+@media (hover:hover) and (pointer:fine){
+  .row-actions button:hover:not(:disabled),.row-actions a:hover{background:var(--surface-2);border-color:#d5d5dc}
+  .row-actions .danger:hover:not(:disabled){background:var(--err-soft);border-color:#f3c6c6}
+}
+
+.pill{
+  display:inline-flex;align-items:center;height:19px;padding:0 7px;border-radius:99px;
+  background:var(--surface-2);border:1px solid var(--line-2);
+  font-size:11px;font-weight:500;color:var(--t2);
+}
+.pill.ok{background:var(--ok-soft);border-color:transparent;color:var(--ok)}
+.pill.warn{background:var(--warn-soft);border-color:transparent;color:var(--warn)}
+.pill.err{background:var(--err-soft);border-color:transparent;color:var(--err)}
+
+.linkish{font-size:12px;font-weight:500;color:var(--t2);transition:color 150ms ease}
+.linkish:hover{color:var(--accent)}
+
+/* key/value facts */
+.facts{padding:4px 0}
+.facts > div{display:flex;align-items:center;gap:12px;padding:9px 16px}
+.facts > div + div{border-top:1px solid var(--line)}
+.facts dt{font-size:12.5px;color:var(--t3);width:120px;flex-shrink:0}
+.facts dd{font-size:12.5px;color:var(--t1);min-width:0;overflow:hidden;text-overflow:ellipsis}
+.facts .mono{font-family:var(--mono);font-size:11.5px}
+
+/* one row per environment variable; the value column can be a refusal */
+.envrow{display:flex;align-items:center;gap:12px;padding:9px 16px}
+.envrow + .envrow{border-top:1px solid var(--line)}
+.envrow .k{font-family:var(--mono);font-size:11.5px;color:var(--t1);flex-shrink:0;max-width:40%;overflow:hidden;text-overflow:ellipsis}
+.envrow .v{
+  font-family:var(--mono);font-size:11.5px;color:var(--t2);
+  min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.envrow .v.hidden{color:var(--t3);font-style:italic}
+.envrow .tags{display:flex;gap:5px;flex-shrink:0}
+
+.logbox{
+  margin:0;padding:14px 16px;max-height:340px;overflow:auto;
+  font:11.5px/1.65 var(--mono);color:var(--t2);
+  white-space:pre-wrap;word-break:break-word;background:var(--surface-2);
+}
+
+/* generic list row, reused by the schedule and the rollback targets */
+.joblist-row{display:flex;align-items:center;gap:12px;padding:11px 16px}
+.joblist-row + .joblist-row{border-top:1px solid var(--line)}
+.joblist-row .id{min-width:0;flex:1}
+.joblist-row .an{font-weight:550;letter-spacing:-.01em;font-size:13px}
+.joblist-row .an.mono{font-family:var(--mono);font-size:11.5px;font-weight:400}
+.joblist-row .ad{font-size:11.5px;color:var(--t3);margin-top:2px}
+
+/* server cards */
+.server-card{padding:14px 16px}
+.server-meta{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--t3)}
+.gauges{display:flex;flex-direction:column;gap:10px;margin:14px 0 0}
+.gauges > div{display:grid;grid-template-columns:70px 1fr;grid-template-areas:"label value" "bar bar";gap:2px 10px;align-items:center}
+.gauges dt{grid-area:label;font-size:12px;color:var(--t3)}
+.gauges dd{grid-area:value;font-family:var(--mono);font-size:12px;color:var(--t1);margin:0;text-align:right}
+.gauges .bar{grid-area:bar;height:4px;border-radius:2px;background:var(--line);overflow:hidden;margin-top:3px}
+.gauges .bar span{display:block;height:100%;border-radius:2px;background:var(--accent)}
+.server-note{margin-top:14px;font-size:11.5px;line-height:1.5;color:var(--t3)}
+
+/* pagination */
+.pager{display:flex;align-items:center;justify-content:center;gap:14px;padding:4px 0}
+.pager button{
+  height:28px;padding:0 12px;border-radius:8px;
+  background:var(--surface);border:1px solid var(--line-2);box-shadow:var(--sh-1);
+  font-size:12.5px;font-weight:500;color:var(--t1);
+  transition:background-color 150ms ease,opacity 140ms ease;
+}
+.pager button:disabled{opacity:.45;cursor:default}
+.pager button:hover:not(:disabled){background:var(--surface-2)}
+.pager .num{font-family:var(--mono);font-size:11.5px;color:var(--t3)}
+
+@media (max-width:680px){
+  .envrow{flex-wrap:wrap}
+  .envrow .k{max-width:100%}
+  .facts > div{flex-direction:column;align-items:flex-start;gap:2px}
+  .facts dt{width:auto}
+}

@@ -16,7 +16,7 @@
 .rail .logo svg{width:16px;height:16px}
 .rail-btn{
   position:relative;width:36px;height:36px;border-radius:9px;
-  display:grid;place-items:center;color:var(--t3);
+  display:grid;place-items:center;color:var(--t3);text-decoration:none;
   transition:color 150ms ease,background-color 150ms ease,transform 140ms var(--ease-out);
 }
 .rail-btn svg{width:17px;height:17px}

@@ -360,6 +360,34 @@ app.get('/app/overview', async c => {
 })
 
 /**
+ * The full deployment history, which the overview only ever shows five rows of.
+ * `app` narrows it to one application — the same list its own page shows.
+ */
+app.get('/app/deployments', async c => {
+  if (!service) return c.json(notConfigured, 503)
+
+  const number = (raw: string | undefined, fallback: number) => {
+    const value = Number(raw)
+    return Number.isFinite(value) ? value : fallback
+  }
+
+  try {
+    const page = await service.history({
+      env: c.req.query('env') ?? null,
+      skip: number(c.req.query('skip'), 0),
+      take: number(c.req.query('take'), 50),
+      application: c.req.query('app'),
+    })
+    c.header('Cache-Control', 'private, no-store')
+    return c.json(page)
+  } catch (error) {
+    const { status, body } = toErrorResponse(error)
+    console.error(`[deployments] ${body.error.code}: ${body.error.message}`)
+    return c.json(body, status as ContentfulStatusCode)
+  }
+})
+
+/**
  * The first-run diagnostic. Behind the session guard like everything else: it
  * names the instance, its version and the team, and says which abilities the
  * token carries — a useful map for whoever is trying to get in.
@@ -535,6 +563,44 @@ app.post('/app/deploy', async c => {
 app.post('/app/deployments/:uuid/cancel', c =>
   act(c, service => service.cancelDeployment(c.req.param('uuid'))),
 )
+
+app.get('/app/applications/:uuid', async c => {
+  if (!service) return c.json(notConfigured, 503)
+  try {
+    c.header('Cache-Control', 'private, no-store')
+    return c.json(await service.detail(c.req.param('uuid')))
+  } catch (error) {
+    const { status, body } = toErrorResponse(error)
+    console.error(`[application] ${body.error.code}: ${body.error.message}`)
+    return c.json(body, status as ContentfulStatusCode)
+  }
+})
+
+app.get('/app/applications/:uuid/logs', async c => {
+  if (!service) return c.json(notConfigured, 503)
+  const lines = Number(c.req.query('lines'))
+  try {
+    c.header('Cache-Control', 'private, no-store')
+    return c.json(await service.logs(c.req.param('uuid'), Number.isFinite(lines) ? lines : 200))
+  } catch (error) {
+    const { status, body } = toErrorResponse(error)
+    console.error(`[logs] ${body.error.code}: ${body.error.message}`)
+    return c.json(body, status as ContentfulStatusCode)
+  }
+})
+
+app.post('/app/applications/:uuid/rollback', async c => {
+  let body: Record<string, unknown>
+  try {
+    body = await readBody(c)
+  } catch {
+    return badRequest(c, 'Expected a JSON body.')
+  }
+  const commit = typeof body.commit === 'string' ? body.commit.trim() : ''
+  if (!commit) return badRequest(c, 'Expected `commit` in the body — the image tag to roll back to.')
+
+  return act(c, service => service.rollback(c.req.param('uuid'), commit))
+})
 
 app.post('/app/applications/:uuid/autodeploy', async c => {
   let body: Record<string, unknown>

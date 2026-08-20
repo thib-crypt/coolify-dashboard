@@ -19,7 +19,13 @@ export type {
 export type {
   ActionOutcome,
   ActionResponse,
+  AppEnvVar,
+  ApplicationDetailResponse,
+  ApplicationLogsResponse,
   CheckStatus,
+  DegradedNote,
+  DeploymentHistoryResponse,
+  RollbackTarget,
   LiveEvent,
   SessionResponse,
   SetupCheck,
@@ -27,7 +33,15 @@ export type {
   ToastTone,
 } from '@shared/bff'
 
-import type { ActionResponse, LiveEvent, SessionResponse, SetupReport } from '@shared/bff'
+import type {
+  ActionResponse,
+  ApplicationDetailResponse,
+  ApplicationLogsResponse,
+  DeploymentHistoryResponse,
+  LiveEvent,
+  SessionResponse,
+  SetupReport,
+} from '@shared/bff'
 import type {
   Dashboard,
   EnvironmentName,
@@ -69,6 +83,25 @@ export interface DataSource {
   runScheduledTask(owner: 'application' | 'service', ownerId: string, taskId: string): Promise<ActionResponse>
   /* The dashboard's own front door (phase 7). A source with no password behind
      it answers `required: false`, and the UI never shows a sign-in screen. */
+  /* Reads that only one page needs, so the overview payload does not carry
+     them. Each goes through the BFF's cache, and the first two share their
+     keys with `/app/overview` — opening a page while the dashboard is warm
+     therefore costs nothing upstream. */
+
+  /** Full deployment history, or one application's when `application` is given. */
+  getDeployments(query: {
+    /** the environment to read, `null` for the first one the team has */
+    env?: EnvironmentName | null
+    skip?: number
+    take?: number
+    application?: string
+  }): Promise<DeploymentHistoryResponse>
+  getApplication(uuid: string): Promise<ApplicationDetailResponse>
+  /** A stopped container answers with no lines and a `note` saying so. */
+  getApplicationLogs(uuid: string, lines?: number): Promise<ApplicationLogsResponse>
+  /** Redeploys an image already built; `commit` is its tag. */
+  rollback(uuid: string, commit: string): Promise<ActionResponse>
+
   /**
    * The first-run diagnostic. Every probe behind it is a read, so this is safe
    * to run at any time — including while everything is working.

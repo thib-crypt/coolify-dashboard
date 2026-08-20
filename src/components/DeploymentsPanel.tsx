@@ -13,7 +13,6 @@ interface Props {
   /** true while the push channel is up — the ticker drains instead of looping */
   streaming: boolean
   onCancel: (deployment: Deployment) => void | Promise<void>
-  onViewAll: (label: string) => void
 }
 
 function FinishedRow({ deployment }: { deployment: Deployment }) {
@@ -39,14 +38,14 @@ function FinishedRow({ deployment }: { deployment: Deployment }) {
   )
 }
 
-export function DeploymentsPanel({ deployments, count, index, logs, streaming, onCancel, onViewAll }: Props) {
+export function DeploymentsPanel({ deployments, count, index, logs, streaming, onCancel }: Props) {
   return (
     <Panel
       title="Deployments"
       label="Deployments"
       count={count}
       index={index}
-      more={{ label: 'View all', onClick: onViewAll }}
+      more={{ label: 'View all', to: '/deployments' }}
     >
       {deployments.map(d =>
         d.state === 'running'

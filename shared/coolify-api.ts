@@ -195,8 +195,29 @@ export interface ApplicationLogsResponse {
 
 export interface RollbackImage {
   image?: string
-  tag?: string
+  /** what `POST /applications/{uuid}/rollback` wants as its `commit` */
+  tag?: string | null
   created_at?: IsoDateTime
+  /** the tag the running container was built from */
+  is_current?: boolean
+}
+
+/**
+ * `GET /applications/{uuid}/rollback-images` shells into the server and reads
+ * `docker images`, so an unreachable server yields `{ current: null, images: [] }`
+ * with a 200 rather than an error — absence here is not a promise that there is
+ * nothing to roll back to.
+ */
+export interface RollbackImagesResponse {
+  current?: string | null
+  images?: RollbackImage[]
+}
+
+/** Answer of `POST /applications/{uuid}/rollback`. */
+export interface RollbackResponse {
+  message?: string
+  /** absent when Coolify skipped the deployment — same 200-means-nothing trap as `/deploy` */
+  deployment_uuid?: string
 }
 
 export interface ServerSetting {

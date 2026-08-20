@@ -57,6 +57,11 @@ describe('classify', () => {
     assert.equal(classify(429, 'Deployment queue is full. Please wait for existing deployments to complete.'), 'queue_full')
     assert.equal(classify(429, 'Too Many Attempts.'), 'rate_limited')
   })
+
+  it('recognises the same full queue behind a rollback, which answers 400', () => {
+    assert.equal(classify(400, 'Deployment queue is full. Please wait for existing deployments to complete.'), 'queue_full')
+    assert.equal(classify(400, 'Application is not running.'), 'bad_request')
+  })
 })
 
 describe('abilityProbe', () => {

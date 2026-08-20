@@ -98,10 +98,18 @@ export function primaryFqdn(fqdn: string | null | undefined): string | null {
   return first ?? null
 }
 
-export function displayDomain(fqdn: string | null | undefined): string {
+/**
+ * `api.example.com`. The scheme is noise once every row carries one, and the
+ * trailing slash is Coolify's, not the domain's.
+ */
+export function bareDomain(fqdn: string | null | undefined): string | null {
   const first = primaryFqdn(fqdn)
-  if (!first) return 'internal · no public domain'
+  if (!first) return null
   return first.replace(/^https?:\/\//, '').replace(/\/$/, '')
+}
+
+export function displayDomain(fqdn: string | null | undefined): string {
+  return bareDomain(fqdn) ?? 'internal · no public domain'
 }
 
 export function initialOf(name: string): string {
