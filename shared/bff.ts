@@ -41,6 +41,43 @@ export interface AuthStatus {
   authenticated: boolean
 }
 
+/* -------------------------------------------------- first-run diagnostic -- */
+
+export type CheckStatus =
+  /** works */
+  | 'ok'
+  /** works, but something is off or unavailable that you may want */
+  | 'warn'
+  /** the dashboard cannot do its job until this is fixed */
+  | 'fail'
+  /** could not be determined — the reason is in `detail` */
+  | 'unknown'
+
+/** One thing `GET /app/setup` looked at, and what to do about what it found. */
+export interface SetupCheck {
+  id: string
+  title: string
+  status: CheckStatus
+  /** what was observed, in one sentence */
+  detail: string
+  /** what to do about it, when there is something to do */
+  hint?: string
+  /** the Coolify page where it gets fixed */
+  link?: string
+}
+
+export interface SetupReport {
+  generatedAt: string
+  /** true when nothing is `fail`: the dashboard will work, warnings and all */
+  ok: boolean
+  coolifyUrl: string | null
+  /** plain-text version of the instance, when it answered */
+  version: string | null
+  /** the team the token belongs to, when it could be read */
+  team: string | null
+  checks: SetupCheck[]
+}
+
 /** Answer of `GET`, `POST` and `DELETE` on `/app/session`. */
 export interface SessionResponse extends AuthStatus {
   /** when the current session stops being valid, null when there is none */

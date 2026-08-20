@@ -59,6 +59,46 @@ describe('classify', () => {
   })
 })
 
+describe('abilityProbe', () => {
+  it('asks with a GET that Coolify only ever answers 405 to', async () => {
+    const calls = stubFetch([{ status: 405, body: { message: 'This endpoint has changed to a POST request.' } }])
+    const verdict = await createCoolifyClient(config).abilityProbe('deploy')
+
+    assert.deepEqual(verdict, { granted: true, reason: 'granted', message: 'Granted.' })
+    // A GET, so nothing was deployed to find out whether deploying is allowed.
+    assert.equal(calls[0]?.method, 'GET')
+    assert.equal(calls[0]?.url, 'https://coolify.test/api/v1/deploy')
+  })
+
+  it('probes `write` on the route that only says it moved to POST', async () => {
+    const calls = stubFetch([{ status: 405, body: { message: 'This endpoint has changed to a POST request.' } }])
+    await createCoolifyClient(config).abilityProbe('write')
+    assert.equal(calls[0]?.url, 'https://coolify.test/api/v1/enable')
+  })
+
+  it('reads a missing ability out of the 403', async () => {
+    stubFetch([{ status: 403, body: { message: 'Missing required permissions: deploy' } }])
+    const verdict = await createCoolifyClient(config).abilityProbe('deploy')
+    assert.equal(verdict.granted, false)
+    assert.equal(verdict.reason, 'missing')
+  })
+
+  it('separates the role refusal, which has a different fix', async () => {
+    stubFetch([{
+      status: 403,
+      body: { message: 'This API token has permissions (deploy) that exceed your current role as a team member. …' },
+    }])
+    const verdict = await createCoolifyClient(config).abilityProbe('deploy')
+    assert.equal(verdict.reason, 'role')
+  })
+
+  it('learns nothing, and says so, when the instance does not answer', async () => {
+    stubFetch([{ status: 500, body: { message: 'Server Error' } }])
+    const verdict = await createCoolifyClient(config).abilityProbe('write')
+    assert.deepEqual(verdict, { granted: false, reason: 'unavailable', message: 'Server Error' })
+  })
+})
+
 describe('writes', () => {
   it('sends JSON with the content type Coolify insists on', async () => {
     const calls = stubFetch([{ status: 200, body: { deployments: [] } }])

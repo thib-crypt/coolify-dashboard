@@ -16,9 +16,18 @@ export type {
   Trend,
 } from '@shared/dashboard'
 
-export type { ActionOutcome, ActionResponse, LiveEvent, SessionResponse, ToastTone } from '@shared/bff'
+export type {
+  ActionOutcome,
+  ActionResponse,
+  CheckStatus,
+  LiveEvent,
+  SessionResponse,
+  SetupCheck,
+  SetupReport,
+  ToastTone,
+} from '@shared/bff'
 
-import type { ActionResponse, LiveEvent, SessionResponse } from '@shared/bff'
+import type { ActionResponse, LiveEvent, SessionResponse, SetupReport } from '@shared/bff'
 import type {
   Dashboard,
   EnvironmentName,
@@ -60,6 +69,11 @@ export interface DataSource {
   runScheduledTask(owner: 'application' | 'service', ownerId: string, taskId: string): Promise<ActionResponse>
   /* The dashboard's own front door (phase 7). A source with no password behind
      it answers `required: false`, and the UI never shows a sign-in screen. */
+  /**
+   * The first-run diagnostic. Every probe behind it is a read, so this is safe
+   * to run at any time — including while everything is working.
+   */
+  getSetup(): Promise<SetupReport>
   getSession(): Promise<SessionResponse>
   /** Rejects with a `DashboardError` — `unauthenticated` on a wrong password. */
   signIn(password: string): Promise<SessionResponse>

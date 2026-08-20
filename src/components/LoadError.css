@@ -6,10 +6,13 @@
 .loaderr-card h1{font-size:17px;font-weight:600;letter-spacing:-.02em;color:var(--t1);margin:0 0 10px}
 .loaderr-card .msg{font-size:13.5px;line-height:1.55;color:var(--t2);margin:0}
 .loaderr-card .hint{font-size:12.5px;line-height:1.55;color:var(--t3);margin:8px 0 0}
+.loaderr-card .actions{display:flex;gap:8px;margin-top:18px;flex-wrap:wrap}
 .loaderr-card button{
-  margin-top:18px;padding:8px 14px;border-radius:8px;
+  padding:8px 14px;border-radius:8px;
   background:var(--accent);color:#fff;font-size:12.5px;font-weight:500;
   box-shadow:var(--sh-1);transition:background-color 160ms ease,transform 140ms var(--ease-out);
 }
 .loaderr-card button:hover{background:var(--accent-2)}
 .loaderr-card button:active{transform:scale(.97)}
+.loaderr-card .ghost{background:transparent;color:var(--t2);box-shadow:none;border:1px solid var(--line-2)}
+.loaderr-card .ghost:hover{background:var(--hover);color:var(--t1)}

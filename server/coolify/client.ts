@@ -101,6 +101,37 @@ export interface CoolifyClient {
   applicationAction(uuid: string, action: ApplicationAction): Promise<Api.StartApplicationResponse>
   patchApplication(uuid: string, body: Api.PatchApplicationBody): Promise<void>
   runScheduledTask(owner: TaskOwner, ownerUuid: string, taskUuid: string): Promise<Api.MessageResponse>
+
+  /* --- diagnostics (phase 7) -------------------------------------------- */
+
+  /**
+   * Whether this token carries `deploy` or `write` — asked without doing
+   * anything at all.
+   *
+   * Coolify keeps a GET beside each of those POST routes whose only job is to
+   * answer *"This endpoint has changed to a POST request."* (`post_required`),
+   * and those GETs sit behind the same `api.ability` middleware as the real
+   * action. So `GET /deploy` and `GET /enable` are ability probes with no side
+   * effect: **405 is a yes**, 403 is a no, and the message says which no —
+   * missing ability, or a token whose abilities exceed its owner's team role.
+   */
+  abilityProbe(ability: ProbedAbility): Promise<AbilityVerdict>
+}
+
+/** The two abilities that have a side-effect-free route to ask about. */
+export type ProbedAbility = 'deploy' | 'write'
+
+export interface AbilityVerdict {
+  granted: boolean
+  /**
+   * `granted` — the probe answered 405.
+   * `missing` — the ability is not on the token.
+   * `role` — the abilities exceed the owner's role in the team (member, not admin).
+   * `unavailable` — the instance never answered, so nothing was learned.
+   */
+  reason: 'granted' | 'missing' | 'role' | 'unavailable'
+  /** Coolify's own wording, or ours when it did not answer */
+  message: string
 }
 
 export type ApplicationAction = 'start' | 'restart' | 'stop'
@@ -201,6 +232,9 @@ export function createCoolifyClient(config: ConfiguredBffConfig): CoolifyClient 
     return value as T[]
   }
 
+  /** `post_required` answers 405 to everyone the ability middleware let through. */
+  const ABILITY_PROBES: Record<ProbedAbility, string> = { deploy: '/deploy', write: '/enable' }
+
   return {
     version: () => getText('/version'),
     team: () => getJson<Api.Team>('/team'),
@@ -263,6 +297,25 @@ export function createCoolifyClient(config: ConfiguredBffConfig): CoolifyClient 
 
     patchApplication: async (uuid, body) => {
       await request(`/applications/${encodeURIComponent(uuid)}`, { method: 'PATCH', body })
+    },
+
+    abilityProbe: async ability => {
+      try {
+        await request(ABILITY_PROBES[ability])
+        // A 2xx here would mean Coolify started answering this GET for real,
+        // which no version does — but it did let the call through.
+        return { granted: true, reason: 'granted', message: 'Granted.' }
+      } catch (error) {
+        if (!(error instanceof CoolifyError)) throw error
+        if (error.status === 405) return { granted: true, reason: 'granted', message: 'Granted.' }
+        if (error.status === 403) {
+          // `ApiAbility` sends this exact refusal when the token's abilities
+          // exceed its owner's role — a different fix from ticking a box.
+          const role = error.message.toLowerCase().includes('exceed your current role')
+          return { granted: false, reason: role ? 'role' : 'missing', message: error.message }
+        }
+        return { granted: false, reason: 'unavailable', message: error.message }
+      }
     },
 
     runScheduledTask: (owner, ownerUuid, taskUuid) =>

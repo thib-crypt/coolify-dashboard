@@ -234,6 +234,36 @@ export const mockSource: DataSource = {
     return { outcome: 'queued', message: 'Scheduled task execution queued.' }
   },
 
+  // A plausible report, so the screen can be worked on without an instance:
+  // one thing to fix, one thing switched off, one that could not be determined.
+  async getSetup() {
+    return {
+      generatedAt: new Date().toISOString(),
+      ok: true,
+      coolifyUrl: 'https://coolify.example.com',
+      version: 'v4.3.2',
+      team: 'Acme',
+      checks: [
+        { id: 'config', title: 'Configuration', status: 'ok' as const,
+          detail: 'COOLIFY_URL is https://coolify.example.com, and a token is set.' },
+        { id: 'reachable', title: 'The instance answers', status: 'ok' as const,
+          detail: 'Coolify v4.3.2 at https://coolify.example.com.' },
+        { id: 'ability-read', title: 'Ability · read', status: 'ok' as const,
+          detail: 'Granted — the dashboard can display everything it shows.' },
+        { id: 'ability-read-sensitive', title: 'Ability · read:sensitive', status: 'unknown' as const,
+          detail: 'No server to ask about, so this could not be determined.' },
+        { id: 'ability-deploy', title: 'Ability · deploy', status: 'warn' as const,
+          detail: 'Missing required permissions: deploy',
+          hint: 'Deploy, cancel, restart and stop will report the missing ability instead of working.',
+          link: 'https://coolify.example.com/security/api-tokens' },
+        { id: 'password', title: 'Dashboard password', status: 'ok' as const,
+          detail: 'Set — the dashboard asks for it and keeps a signed session.' },
+        { id: 'webhooks', title: 'Incoming webhooks', status: 'warn' as const,
+          detail: 'No WEBHOOK_SECRET, so Coolify cannot push here — updates arrive by polling.' },
+      ],
+    }
+  },
+
   // No BFF behind the mock, so no door to knock on: the UI goes straight in.
   async getSession() {
     return { required: false, authenticated: true, expiresAt: null }

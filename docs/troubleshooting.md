@@ -3,6 +3,19 @@
 Start here:
 
 ```bash
+curl -s http://127.0.0.1:8787/app/setup | jq
+```
+
+The setup check runs every diagnostic on this page and says which problem you actually have
+— it separates the four situations Coolify reports as the same `403`, and links to the page
+that fixes each. It is also on screen: every failure-to-load has a **Run the setup check**
+button, and with nothing configured it takes the screen outright. Nothing it does changes
+anything, so it is safe to run at any time. With a `DASHBOARD_PASSWORD` set, sign in first —
+`curl` needs `-b`/`-c` and a `POST /app/session`.
+
+For the state of the moving parts rather than the configuration:
+
+```bash
 curl -s http://127.0.0.1:8787/app/health | jq
 ```
 

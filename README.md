@@ -90,7 +90,9 @@ tooltips, `prefers-reduced-motion` support, and breakpoints at 1020 / 680 px.
 ## Quick start
 
 You need a Coolify v4 instance with its API enabled and a token —
-**[docs/coolify-setup.md](docs/coolify-setup.md)** walks through it in five minutes.
+**[docs/coolify-setup.md](docs/coolify-setup.md)** walks through it in five minutes. If
+anything is off afterwards, the dashboard's own **setup check** says which of the four
+identical-looking `403`s you have and links to the page that fixes it.
 
 ### Docker (recommended)
 
@@ -133,7 +135,7 @@ Other scripts:
 |---|---|
 | `npm run dev` | SPA + BFF together, both watching |
 | `npm run dev:mock` | SPA alone on fixture data — no instance, no token needed |
-| `npm test` | 229 unit tests (mappers, cache, client, actions, hub, poller, webhooks, probes, metrics, auth, static) |
+| `npm test` | 245 unit tests (mappers, cache, client, actions, hub, poller, webhooks, probes, metrics, auth, setup, static) |
 | `npm run typecheck` | Both TypeScript projects |
 | `npm run build` | Type-check, bundle the SPA into `dist/` and the BFF into `dist-server/` |
 | `npm start` | Run the built server, which then serves the built SPA too |

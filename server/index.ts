@@ -30,6 +30,7 @@ import { EMPTY_METRICS, createMetricsCollector, metricsTargets } from './metrics
 import { createOverviewService, describeError } from './overview'
 import { createPoller } from './poller'
 import { EMPTY_SNAPSHOT, createProber, httpTargets, tcpTargets } from './probes'
+import { runSetupChecks } from './setup'
 import { createSignalStore } from './signals'
 import { mountStatic, resolveStaticDir } from './static'
 import { createStore } from './store'
@@ -356,6 +357,26 @@ app.get('/app/overview', async c => {
     if (body.error.retryAfterSeconds) c.header('Retry-After', String(body.error.retryAfterSeconds))
     return c.json(body, status as 429 | 500 | 502 | 504)
   }
+})
+
+/**
+ * The first-run diagnostic. Behind the session guard like everything else: it
+ * names the instance, its version and the team, and says which abilities the
+ * token carries — a useful map for whoever is trying to get in.
+ *
+ * It answers 200 even when it found something broken; `ok` and each check's
+ * `status` carry that. A 500 here would be the diagnostic failing, which is the
+ * one thing it must not do.
+ */
+app.get('/app/setup', async c => {
+  const report = await runSetupChecks({
+    config,
+    client,
+    storeKind: store.kind,
+    passwordSet: auth.required,
+  })
+  c.header('Cache-Control', 'private, no-store')
+  return c.json(report)
 })
 
 /* --------------------------------------------------------------- live ---- */

@@ -14,6 +14,7 @@ import type {
   Server,
   ServerMetrics,
   SessionResponse,
+  SetupReport,
 } from './types'
 import type { BffErrorResponse, LiveEvent, OverviewResponse } from '@shared/bff'
 
@@ -132,6 +133,12 @@ export function createBffSource(basePath = '/app'): DataSource {
     stopApplication: appId => act(`${app(appId)}/stop`),
     runScheduledTask: (owner, ownerId, taskId) =>
       act(`/${owner}s/${encodeURIComponent(ownerId)}/tasks/${encodeURIComponent(taskId)}/run`),
+
+    async getSetup() {
+      const res = await call('/setup')
+      if (!res.ok) throw await readError(res)
+      return (await res.json()) as SetupReport
+    },
 
     getSession: () => session('GET'),
     signIn: password => session('POST', { password }),

@@ -13,6 +13,11 @@ this project follows [semantic versioning](https://semver.org/) from 1.0.0 onwar
   door for five minutes. Unset, every route stays open exactly as before: an upgrade cannot
   lock anyone out of their own dashboard.
 
+- **A first-run setup check**, at `GET /app/setup` and behind every failure-to-load screen.
+  It separates the four problems Coolify reports identically — revoked token, missing
+  ability, member-level owner, blocked IP — and links to the page that fixes each. Every
+  probe is a read: `deploy` and `write` are tested on the GET twin of each action route,
+  which answers `405` behind the same ability middleware.
 - **Published container images.** `ghcr.io/thib-crypt/coolify-dashboard`, built by CI for
   `linux/amd64` and `linux/arm64`, tagged per release plus `:edge` for `main`, each with a
   signed build provenance attestation. `docker-compose.yml` now pulls the image instead of

@@ -11,6 +11,7 @@ import { Login } from './components/Login'
 import { PageHead } from './components/PageHead'
 import { PulseStrip } from './components/PulseStrip'
 import { Rail } from './components/Rail'
+import { Setup } from './components/Setup'
 import { SchedulePanel } from './components/SchedulePanel'
 import { Toasts } from './components/Toasts'
 import { Topbar } from './components/Topbar'
@@ -39,6 +40,7 @@ function Dashboard({ onSignOut }: { onSignOut?: () => void }) {
   // component only reacts to what it publishes.
   const { data, error, setEnvironment, reload, connected, logs, awaitDeployment } = useLiveDashboard()
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [setupOpen, setSetupOpen] = useState(false)
   const searchRef = useRef<HTMLButtonElement>(null)
 
   const closePalette = useCallback(() => {
@@ -154,12 +156,19 @@ function Dashboard({ onSignOut }: { onSignOut?: () => void }) {
     }
   }
 
+  // With nothing configured there is nothing else to show and only one thing to
+  // do, so the check takes the screen rather than hiding behind a button.
+  if (setupOpen || (error && !data && error.code === 'not_configured')) {
+    return <Setup onClose={() => setSetupOpen(false)} onRetry={reload} />
+  }
+
   if (error && !data) {
     return (
       <LoadError
         message={error.message}
         {...(error.hint ? { hint: error.hint } : {})}
         onRetry={reload}
+        onRunSetup={() => setSetupOpen(true)}
       />
     )
   }

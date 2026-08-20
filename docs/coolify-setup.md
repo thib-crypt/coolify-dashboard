@@ -57,7 +57,14 @@ COOLIFY_URL=https://coolify.example.com   # no /api/v1, no trailing slash
 COOLIFY_TOKEN=1|xxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-Check it end to end:
+Check it end to end — either with the dashboard's own setup check, which tests every ability
+without using any of them:
+
+```bash
+curl -s http://127.0.0.1:8787/app/setup | jq '.checks[] | {title, status, detail}'
+```
+
+or by hand:
 
 ```bash
 curl -H "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_URL/api/v1/version"

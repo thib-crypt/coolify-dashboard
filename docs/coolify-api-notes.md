@@ -44,6 +44,35 @@ is doing something much harder than reading it.
 - **`status` is a compound string**, `"running:healthy"` — state and health in one field,
   and the health half can be absent.
 
+## Asking what a token can do, without using it
+
+Every action route has a GET twin — `GET /deploy`, `GET /enable`,
+`GET /applications/{uuid}/restart` — whose handler is `OtherController::post_required` and
+whose entire answer is `405 "This endpoint has changed to a POST request."` Those twins are
+registered **behind the same `api.ability` middleware as the POST**:
+
+```php
+Route::get('/deploy',  [OtherController::class, 'post_required'])->middleware(['api.ability:deploy']);
+Route::get('/enable',  [OtherController::class, 'post_required']);   // group middleware: api.ability:write
+```
+
+Which makes them free ability probes:
+
+| Answer | Means |
+|---|---|
+| `405` | the ability is on the token — the middleware let the call reach the handler |
+| `403 "Missing required permissions: …"` | the ability is not on the token |
+| `403 "This API token has permissions (…) that exceed your current role…"` | the abilities are there, but the owner is a team *member*; `ApiAbility` refuses before checking anything else |
+| `400 "Invalid token."` | the token is wrong or revoked |
+
+Nothing is deployed, started or enabled to learn this. `root` short-circuits `ApiAbility`, so
+a root token answers `405` to every probe — correctly, since it may do all of it.
+
+**`read:sensitive` has no probe**, because it guards no route: `ApiSensitiveData` sets a
+`can_read_sensitive` request attribute that controllers consult when deciding whether to
+include a field. The only way to ask is to look at a field it withholds — `sentinel_token`
+on `GET /servers/{uuid}/sentinel`, which is *absent* rather than empty without it.
+
 ## Actions
 
 - **`start` / `stop` / `restart` are `POST`.** The documentation says `GET`; current

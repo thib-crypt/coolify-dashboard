@@ -130,10 +130,15 @@ thin body until a session presents itself, because a container health check has 
 every commit to main (`:edge`), each with a signed provenance attestation. `docker-compose.yml`
 pulls it rather than building.
 
+**There is a first-run diagnostic**, at `GET /app/setup` and on screen behind any failure to
+load: it names which of the four indistinguishable `403`s you have, and links to the Coolify
+page that fixes it. The find that made the ability checks possible: every action route has a
+GET twin behind the same ability middleware whose only answer is *"this moved to POST"*, so
+`deploy` and `write` can be tested without deploying or writing
+([coolify-api-notes.md](coolify-api-notes.md#asking-what-a-token-can-do-without-using-it)).
+
 What remains is what makes it pleasant to install:
 
-- **A guided `/setup` page** on first run: test the token against `/api/v1/version` and
-  `/api/v1/team`, check each ability, and list precisely what is missing.
 - **A Coolify service template** (`templates/compose/` upstream) for a genuine one-click
   install from Coolify's own UI — the most "plugable" this architecture allows today.
 - **Edge traffic and a real P95**, by enabling Traefik's Prometheus metrics

@@ -100,6 +100,44 @@ as opposed to servers the collector merely tried.
 Coolify is unreachable or unconfigured, which restarting will not fix; the process
 answering at all is the real signal.
 
+### `GET /app/setup`
+
+The first-run diagnostic: what is configured, what the token can actually do, and what to
+fix where. Always `200` — a broken instance is the *finding*, not an error of this endpoint —
+with `ok: false` and per-check statuses.
+
+```json
+{
+  "generatedAt": "2026-08-20T13:35:59.067Z",
+  "ok": false,
+  "coolifyUrl": "https://coolify.example.com",
+  "version": "v4.3.2",
+  "team": "Acme",
+  "checks": [
+    { "id": "config", "title": "Configuration", "status": "ok",
+      "detail": "COOLIFY_URL is https://coolify.example.com, and a token is set." },
+    { "id": "ability-deploy", "title": "Ability · deploy", "status": "warn",
+      "detail": "Missing required permissions: deploy",
+      "hint": "Tick `deploy` on the token, or leave it off deliberately — …",
+      "link": "https://coolify.example.com/security/api-tokens" }
+  ]
+}
+```
+
+`status` is one of `ok`, `warn` (works, but something you may want is off), `fail` (the
+dashboard cannot work until this is fixed) or `unknown` (could not be determined, and saying
+so beats guessing).
+
+**Every probe is a read.** The `deploy` and `write` checks included: Coolify keeps a GET
+beside each of those action routes whose only job is to answer *"This endpoint has changed
+to a POST request."*, and those GETs sit behind the same ability middleware as the action —
+so a `405` is a yes and a `403` is a no, without anything being deployed to find out. See
+[coolify-api-notes.md](coolify-api-notes.md#asking-what-a-token-can-do-without-using-it).
+
+`read:sensitive` has no such route, because it guards no route at all — it is a request
+attribute controllers consult. It is therefore read from a field Coolify withholds without
+it (`sentinel_token`), which is why it answers `unknown` on an instance with no server.
+
 ### `GET /app/overview?env=<name>`
 
 The entire dashboard in one payload — roughly ten Coolify endpoints aggregated, cached per
