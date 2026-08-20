@@ -13,6 +13,10 @@ this project follows [semantic versioning](https://semver.org/) from 1.0.0 onwar
   door for five minutes. Unset, every route stays open exactly as before: an upgrade cannot
   lock anyone out of their own dashboard.
 
+- **Published container images.** `ghcr.io/thib-crypt/coolify-dashboard`, built by CI for
+  `linux/amd64` and `linux/arm64`, tagged per release plus `:edge` for `main`, each with a
+  signed build provenance attestation. `docker-compose.yml` now pulls the image instead of
+  building it.
 - **Packaging.** Multi-stage `Dockerfile` and `docker-compose.yml`: one container that
   serves the built SPA and the API, running as a non-root user, with a health check and a
   volume for the SQLite history.

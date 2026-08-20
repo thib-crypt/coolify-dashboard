@@ -11,6 +11,26 @@ only outbound traffic is to your Coolify instance and to your own applications.
 
 ## Anywhere Docker runs
 
+The image is published to GitHub Container Registry for `linux/amd64` and `linux/arm64`:
+
+| Tag | What it is |
+|---|---|
+| `:latest` | the newest release |
+| `:1`, `:1.2`, `:1.2.3` | pin as tightly as you like |
+| `:edge` | the current state of `main` — useful, not stable |
+
+```bash
+docker run -d --name coolify-dashboard \
+  -p 127.0.0.1:8787:8787 \
+  -v coolify-dashboard-data:/data \
+  -e COOLIFY_URL=https://coolify.example.com \
+  -e COOLIFY_TOKEN=... \
+  -e DASHBOARD_PASSWORD=... \
+  ghcr.io/thib-crypt/coolify-dashboard:latest
+```
+
+Or with Compose, which carries every optional setting as a commented line:
+
 ```bash
 git clone https://github.com/thib-crypt/coolify-dashboard.git
 cd coolify-dashboard
@@ -21,6 +41,13 @@ docker compose up -d
 `docker-compose.yml` publishes on `127.0.0.1:8787` deliberately. The image sets
 `BFF_HOST=0.0.0.0` inside the container, `DATA_DIR=/data` on a named volume, and
 `STATIC_DIR=/app/dist`.
+
+Every published image carries a signed build provenance attestation, so you can check that
+a digest really came out of this repository's workflow:
+
+```bash
+gh attestation verify oci://ghcr.io/thib-crypt/coolify-dashboard:latest --repo thib-crypt/coolify-dashboard
+```
 
 Verify:
 
@@ -33,6 +60,9 @@ is fine, and its health check reflects that on purpose (it asks whether the BFF 
 whether your instance is up).
 
 ### Building the image yourself
+
+You do not have to — but a fork, an air-gapped network or a patch makes it the shorter path.
+Comment out `image:` in `docker-compose.yml` and uncomment `build: .`, or:
 
 ```bash
 docker build -t coolify-dashboard .

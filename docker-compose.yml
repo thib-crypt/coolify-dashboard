@@ -1,23 +1,31 @@
-# Local: cp .env.example .env, fill COOLIFY_URL and COOLIFY_TOKEN, then
-#   docker compose up -d --build
+# Local: cp .env.example .env, fill it in, then
+#   docker compose up -d
 # On Coolify itself: point a Docker Compose resource at this repository and set
-# the same variables in its UI — see docs/DEPLOYMENT.md.
+# the same variables in its UI — see docs/deployment.md.
 
 services:
   dashboard:
-    build: .
-    # Prefer a published image over a rebuild once you have one:
-    # image: ghcr.io/thib-crypt/coolify-dashboard:latest
+    # Published by CI for linux/amd64 and linux/arm64, so deploying does not
+    # mean building. Pin a version (`:1.0.0`) if you would rather decide when to
+    # upgrade; `:edge` is the current state of main. To build from this working
+    # copy instead, comment the line out and uncomment `build:` below.
+    image: ghcr.io/thib-crypt/coolify-dashboard:latest
+    # build: .
     restart: unless-stopped
     ports:
-      # The container has no authentication of its own yet. Publish it on
-      # 127.0.0.1 and put a proxy with auth in front, or keep it on a private
-      # network — see the Security section of the README.
+      # Loopback, because DASHBOARD_PASSWORD is optional and this file cannot
+      # know whether you set one. With a password, publishing on 0.0.0.0 or
+      # attaching a domain is reasonable; without one, anyone who reaches this
+      # port can deploy and stop things — see the README's Security section.
       - "127.0.0.1:8787:8787"
     environment:
       # --- required ---------------------------------------------------------
       COOLIFY_URL: ${COOLIFY_URL:?set COOLIFY_URL, e.g. https://coolify.example.com}
       COOLIFY_TOKEN: ${COOLIFY_TOKEN:?set COOLIFY_TOKEN from Security → API Tokens}
+      # --- strongly recommended: the dashboard's own password ---------------
+      # Empty leaves every route open. Set it before this gets a domain.
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
       # --- optional: push channel ------------------------------------------
       # Set it, then point Coolify's outgoing webhook at
       # https://<this-host>/app/hooks/coolify?secret=<the same value>

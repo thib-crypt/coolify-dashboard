@@ -94,11 +94,25 @@ You need a Coolify v4 instance with its API enabled and a token —
 
 ### Docker (recommended)
 
+The image is published for `linux/amd64` and `linux/arm64`, so there is nothing to build:
+
+```bash
+docker run -d --name coolify-dashboard \
+  -p 127.0.0.1:8787:8787 \
+  -v coolify-dashboard-data:/data \
+  -e COOLIFY_URL=https://coolify.example.com \
+  -e COOLIFY_TOKEN=... \
+  -e DASHBOARD_PASSWORD=... \
+  ghcr.io/thib-crypt/coolify-dashboard:latest
+```
+
+Or with Compose, which also carries the optional settings as comments:
+
 ```bash
 git clone https://github.com/thib-crypt/coolify-dashboard.git
 cd coolify-dashboard
-cp .env.example .env      # set COOLIFY_URL and COOLIFY_TOKEN
-docker compose up -d --build
+cp .env.example .env      # COOLIFY_URL, COOLIFY_TOKEN, DASHBOARD_PASSWORD
+docker compose up -d
 ```
 
 The dashboard is on <http://127.0.0.1:8787>. To run it *on* your Coolify instance as a

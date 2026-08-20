@@ -125,10 +125,13 @@ Ten failed attempts shut the door for five minutes, counted on the connecting ad
 than on `X-Forwarded-For`, which is spoofable. `GET /app/health` stays public and answers a
 thin body until a session presents itself, because a container health check has no cookie.
 
+**The image is published**, too: `ghcr.io/thib-crypt/coolify-dashboard`, built by CI for
+`linux/amd64` and `linux/arm64` on every tag (`:1.2.3`, `:1.2`, `:1`, `:latest`) and on
+every commit to main (`:edge`), each with a signed provenance attestation. `docker-compose.yml`
+pulls it rather than building.
+
 What remains is what makes it pleasant to install:
 
-- **Published images.** `ghcr.io/thib-crypt/coolify-dashboard`, built by CI, tagged per
-  release, so deploying does not mean building.
 - **A guided `/setup` page** on first run: test the token against `/api/v1/version` and
   `/api/v1/team`, check each ability, and list precisely what is missing.
 - **A Coolify service template** (`templates/compose/` upstream) for a genuine one-click

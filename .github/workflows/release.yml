@@ -1,0 +1,105 @@
+# Publishes the container image, so that deploying the dashboard does not mean
+# building it. Two triggers, two meanings:
+#
+#   push to main → :edge, what is on main right now
+#   tag v*       → :1.2.3, :1.2, :1 and :latest — an actual release
+#
+# The image goes to GHCR under the same account as the repository, which needs
+# no secret: `GITHUB_TOKEN` with `packages: write` is enough. A published
+# package is private until you make it public once, in the repository's
+# Packages settings.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  # Lets the build attach a signed provenance attestation to the image.
+  attestations: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  image:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # arm64 matters here: a good share of the cheap servers people run
+      # Coolify on are ARM, and emulating the build is slower than making
+      # every one of those users build it themselves.
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          # `latest` follows the newest semver tag, never a commit on main.
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
+          labels: |
+            org.opencontainers.image.title=Coolify dashboard
+            org.opencontainers.image.description=A real-time companion dashboard for a self-hosted Coolify instance
+            org.opencontainers.image.licenses=MIT
+
+      - id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+      # Proof that this digest came out of this workflow, from this commit.
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Boot the published image and check it answers
+        run: |
+          docker run -d --name dashboard -p 8787:8787 \
+            -e COOLIFY_URL=https://coolify.invalid \
+            -e COOLIFY_TOKEN=ci \
+            -e DASHBOARD_PASSWORD=ci-smoke-test \
+            ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8787/; then break; fi
+            sleep 1
+          done
+          # The shell is served, the guarded API refuses an anonymous read, and
+          # the health endpoint stays reachable without a session.
+          curl -fsS -o /dev/null http://127.0.0.1:8787/
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/app/overview)" = 401
+          curl -sS http://127.0.0.1:8787/app/health | grep -q coolify-dashboard-bff
+          docker logs dashboard
+          docker rm -f dashboard
