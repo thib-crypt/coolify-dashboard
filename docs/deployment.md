@@ -79,7 +79,20 @@ one ESM file with its dependencies inlined. The runtime layer carries no `node_m
 runs as the unprivileged `node` user. `openssh-client` is installed for the one optional
 feature that needs it, the Sentinel metrics collector.
 
-## On Coolify itself
+## On Coolify itself, from the service template
+
+[`templates/coolify/coolify-dashboard.yaml`](../templates/coolify/coolify-dashboard.yaml) is
+a Coolify service template: paste it into **New Resource → Docker Compose Empty** and Coolify
+generates the domain, the dashboard password and the webhook secret, leaving you only
+`COOLIFY_URL` and `COOLIFY_TOKEN` to fill in. [`templates/README.md`](../templates/README.md)
+walks through it.
+
+> **Set `COOLIFY_URL` to the instance you want to watch.** A resource deployed by Coolify
+> that leaves it empty receives Coolify's own injected `COOLIFY_URL` — that resource's own
+> domain — and the dashboard ends up asking itself for the version. The setup check
+> recognises this exact case.
+
+## On Coolify itself, by hand
 
 The dashboard is a normal Docker Compose resource. It can absolutely live on the instance it
 watches — with the caveat that it then goes down with it, which is the one moment you would

@@ -87,6 +87,34 @@ describe('runSetupChecks', () => {
     assert.equal(report.checks.some(entry => entry.id === 'reachable'), false)
   })
 
+  it('catches a dashboard pointed at itself, which answers 200 with its own shell', async () => {
+    const report = await runSetupChecks(
+      deps({
+        client: stubClient({ version: async () => '<!doctype html><div id="root"></div>' }),
+      }),
+    )
+
+    const check = find(report.checks, 'reachable')
+    assert.equal(check.status, 'fail')
+    assert.match(check.detail, /not with a version — it returned an HTML page/)
+    // The specific trap: Coolify injects its own COOLIFY_URL when it is unset.
+    assert.match(check.hint ?? '', /Coolify injects its own COOLIFY_URL/)
+    assert.equal(report.version, null)
+  })
+
+  it('accepts the version shapes Coolify actually returns', async () => {
+    for (const version of ['v4.3.2', '4.3.2', 'v4.3.2\n']) {
+      const report = await runSetupChecks(deps({ client: stubClient({
+        version: async () => version,
+        team: async () => ({ name: 'Acme' }) as never,
+        servers: async () => [{ uuid: 's1' }] as never,
+        serverSentinel: async () => ({ sentinel_token: 'st' }) as never,
+        abilityProbe: async () => ({ granted: true, reason: 'granted', message: 'Granted.' }),
+      }) }))
+      assert.equal(find(report.checks, 'reachable').status, 'ok', version)
+    }
+  })
+
   it('separates a revoked token from an unreachable instance', async () => {
     const report = await runSetupChecks(
       deps({

@@ -13,6 +13,9 @@ this project follows [semantic versioning](https://semver.org/) from 1.0.0 onwar
   door for five minutes. Unset, every route stays open exactly as before: an upgrade cannot
   lock anyone out of their own dashboard.
 
+- **A Coolify service template**, `templates/coolify/coolify-dashboard.yaml`: pasted into a
+  Docker Compose Empty resource, Coolify generates the domain, the dashboard password and the
+  webhook secret, and asks only for the instance URL and an API token.
 - **A first-run setup check**, at `GET /app/setup` and behind every failure-to-load screen.
   It separates the four problems Coolify reports identically — revoked token, missing
   ability, member-level owner, blocked IP — and links to the page that fixes each. Every

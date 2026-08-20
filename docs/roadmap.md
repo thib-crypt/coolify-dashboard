@@ -137,10 +137,15 @@ GET twin behind the same ability middleware whose only answer is *"this moved to
 `deploy` and `write` can be tested without deploying or writing
 ([coolify-api-notes.md](coolify-api-notes.md#asking-what-a-token-can-do-without-using-it)).
 
+**The Coolify service template exists**, at
+[`templates/coolify/coolify-dashboard.yaml`](../templates/coolify/coolify-dashboard.yaml):
+pasted into a Docker Compose Empty resource, Coolify generates the domain, the dashboard
+password and the webhook secret from it. Getting it into Coolify's own service list is a
+pull request against `templates/compose/` upstream, and needs a logo — see
+[`templates/README.md`](../templates/README.md).
+
 What remains is what makes it pleasant to install:
 
-- **A Coolify service template** (`templates/compose/` upstream) for a genuine one-click
-  install from Coolify's own UI — the most "plugable" this architecture allows today.
 - **Edge traffic and a real P95**, by enabling Traefik's Prometheus metrics
   (`PUT /api/v1/servers/{uuid}/proxy/configuration`) and scraping them. That would give the
   traffic strip a source and turn the median-deployment-duration KPI back into a response-time

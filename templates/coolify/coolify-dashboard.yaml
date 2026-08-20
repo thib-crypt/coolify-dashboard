@@ -1,0 +1,56 @@
+# documentation: https://github.com/thib-crypt/coolify-dashboard
+# slogan: A real-time companion dashboard for your Coolify instance — live fleet, deployments, measured uptime and one-key actions.
+# category: monitoring
+# tags: coolify, dashboard, monitoring, uptime, deployments, sse
+# logo: svgs/coolify.svg
+# port: 8787
+
+# Deployed as a Coolify service, this is a one-click install: Coolify generates
+# the domain, the dashboard password and the webhook secret, and asks you for
+# the only two things it cannot know — the URL of the instance to watch and an
+# API token for it.
+#
+# COOLIFY_URL is the URL of the instance you want to *watch*, and it must be set
+# explicitly: a Coolify-deployed resource that leaves it empty gets Coolify's own
+# injected value, which is that resource's own domain — a dashboard pointed at
+# itself. See docs/troubleshooting.md.
+
+services:
+  coolify-dashboard:
+    image: 'ghcr.io/thib-crypt/coolify-dashboard:latest'
+    environment:
+      - SERVICE_URL_COOLIFYDASHBOARD_8787
+      # --- you fill these in ------------------------------------------------
+      - 'COOLIFY_URL=${COOLIFY_URL}'
+      - 'COOLIFY_TOKEN=${COOLIFY_TOKEN}'
+      # --- Coolify generates these, and shows them in this resource's
+      #     environment variables, where you can read or change them ---------
+      - 'DASHBOARD_PASSWORD=${SERVICE_PASSWORD_DASHBOARD}'
+      # Copy this one into Settings → Notifications → Webhook, as
+      #   https://<this-domain>/app/hooks/coolify?secret=<this value>
+      # Without it the dashboard polls instead — a few seconds slower, never blind.
+      - 'WEBHOOK_SECRET=${SERVICE_PASSWORD_WEBHOOK}'
+      # --- optional, with the defaults the image already uses ---------------
+      - 'PROBES_ENABLED=${PROBES_ENABLED:-true}'
+      - 'PROBE_APPS=${PROBE_APPS}'
+      # Mount a key and give its path here to fill the CPU and RAM gauges;
+      # Coolify publishes no metrics endpoint, so this is their only source.
+      - 'METRICS_SSH_KEY=${METRICS_SSH_KEY}'
+      - 'METRICS_SERVERS=${METRICS_SERVERS}'
+    volumes:
+      # Measured uptime and KPI history. Without it both restart from zero on
+      # every redeploy, which is most of what this dashboard adds to Coolify.
+      - 'coolify-dashboard-data:/data'
+    healthcheck:
+      # `ok: false` is a legitimate state — the instance being unreachable is
+      # exactly what this is meant to display — so what this asks is only
+      # whether the BFF still answers.
+      test:
+        - CMD
+        - node
+        - '-e'
+        - "fetch('http://127.0.0.1:8787/app/health').then(r=>r.json()).then(b=>process.exit(b.service?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

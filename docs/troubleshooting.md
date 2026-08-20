@@ -29,6 +29,12 @@ Most of the answers below are a field in it.
 `.env.example` to `.env` and fill both in, or pass them as environment variables. The SPA
 shows this error verbatim, with the next step.
 
+**The dashboard is pointed at itself.** Deployed *by* Coolify, a resource that leaves
+`COOLIFY_URL` unset is given Coolify's own injected value — that resource's own domain — so
+the BFF asks itself for `/api/v1/version` and gets its own HTML shell back, with a `200`.
+Symptoms: nothing loads, and nothing in the logs looks like a failure. Set `COOLIFY_URL`
+explicitly to the instance you want to watch; the setup check names this case directly.
+
 **`Invalid token.`** — Coolify returns **400** for a bad token, not 401. It was mistyped,
 revoked, or belongs to a deleted user. Check it directly:
 

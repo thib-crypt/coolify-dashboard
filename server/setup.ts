@@ -44,6 +44,14 @@ const pages = (base: string | null) => ({
   root: base ?? undefined,
 })
 
+/** Enough of an unexpected body to recognise it, without pasting a page into a card. */
+function describeBody(text: string): string {
+  const trimmed = text.trim()
+  if (/^<(!doctype|html)/i.test(trimmed)) return 'an HTML page'
+  if (!trimmed) return 'an empty body'
+  return `“${trimmed.slice(0, 60)}${trimmed.length > 60 ? '…' : ''}”`
+}
+
 /**
  * Turns an upstream failure into the check that explains it. The four `403`
  * flavours are the whole reason this exists: Coolify says the same status for
@@ -120,6 +128,23 @@ export async function runSetupChecks(deps: SetupDeps): Promise<SetupReport> {
 
   try {
     version = (await client.version()).trim()
+
+    // Something answered, but is it Coolify? The specific way this goes wrong:
+    // a resource deployed *by* Coolify that leaves COOLIFY_URL unset receives
+    // Coolify's own injected value — that resource's own domain — and the
+    // dashboard ends up asking itself for the version, getting its own HTML
+    // shell back with a 200.
+    if (!/^v?\d+\.\d+/.test(version)) {
+      checks.push({
+        id: 'reachable',
+        title: 'The instance answers',
+        status: 'fail',
+        detail: `${config.coolifyUrl}/api/v1/version answered, but not with a version — it returned ${describeBody(version)}.`,
+        hint: 'COOLIFY_URL is pointing at something that is not a Coolify API. If this dashboard is itself deployed by Coolify, note that Coolify injects its own COOLIFY_URL — this resource\'s domain — whenever the variable is left unset, which points the dashboard at itself.',
+      })
+      return report(deps, checks, null, null)
+    }
+
     checks.push(ok('reachable', 'The instance answers', `Coolify ${version} at ${config.coolifyUrl}.`))
   } catch (error) {
     const explained = explainUpstream(error, link)
