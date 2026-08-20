@@ -16,9 +16,9 @@ export type {
   Trend,
 } from '@shared/dashboard'
 
-export type { ActionOutcome, ActionResponse, LiveEvent, ToastTone } from '@shared/bff'
+export type { ActionOutcome, ActionResponse, LiveEvent, SessionResponse, ToastTone } from '@shared/bff'
 
-import type { ActionResponse, LiveEvent } from '@shared/bff'
+import type { ActionResponse, LiveEvent, SessionResponse } from '@shared/bff'
 import type {
   Dashboard,
   EnvironmentName,
@@ -58,7 +58,23 @@ export interface DataSource {
   restartApplication(appId: string): Promise<ActionResponse>
   stopApplication(appId: string): Promise<ActionResponse>
   runScheduledTask(owner: 'application' | 'service', ownerId: string, taskId: string): Promise<ActionResponse>
+  /* The dashboard's own front door (phase 7). A source with no password behind
+     it answers `required: false`, and the UI never shows a sign-in screen. */
+  getSession(): Promise<SessionResponse>
+  /** Rejects with a `DashboardError` — `unauthenticated` on a wrong password. */
+  signIn(password: string): Promise<SessionResponse>
+  signOut(): Promise<SessionResponse>
 }
+
+/**
+ * Fired on `window` when the BFF answers 401 to anything.
+ *
+ * A session expires while the tab is open — after a week, or because the
+ * password changed — and every in-flight fetch starts failing at once. Rather
+ * than teach each caller to recognise that, the adapter announces it once and
+ * the session gate puts the sign-in screen back up.
+ */
+export const SESSION_LOST = 'coolify-dashboard:session-lost'
 
 /** Carries the BFF's error vocabulary through to the UI. */
 export class DashboardError extends Error {

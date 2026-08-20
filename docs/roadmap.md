@@ -117,13 +117,16 @@ This is the first real addition.
 
 ### Phase 7 — Packaging and plugability
 
-Partly done — the container exists and is documented in
-[deployment.md](deployment.md). What remains is what makes it safe and pleasant to install:
+Partly done. The container exists and is documented in [deployment.md](deployment.md), and
+**the dashboard now has a front door**: `DASHBOARD_PASSWORD` is exchanged once at
+`POST /app/session` for an `HttpOnly` cookie carrying a signed expiry — no session store, so
+a restart signs nobody out, and the key derives from the password so that changing it does.
+Ten failed attempts shut the door for five minutes, counted on the connecting address rather
+than on `X-Forwarded-For`, which is spoofable. `GET /app/health` stays public and answers a
+thin body until a session presents itself, because a container health check has no cookie.
 
-- **Authentication.** `DASHBOARD_PASSWORD` and a signed session cookie, so the dashboard can
-  face a domain without an external proxy in front of it. This is the most important item
-  on this list: today the answer is "put a proxy in front", and that is a real gap rather
-  than a design choice.
+What remains is what makes it pleasant to install:
+
 - **Published images.** `ghcr.io/thib-crypt/coolify-dashboard`, built by CI, tagged per
   release, so deploying does not mean building.
 - **A guided `/setup` page** on first run: test the token against `/api/v1/version` and

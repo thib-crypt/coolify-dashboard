@@ -119,7 +119,7 @@ Other scripts:
 |---|---|
 | `npm run dev` | SPA + BFF together, both watching |
 | `npm run dev:mock` | SPA alone on fixture data — no instance, no token needed |
-| `npm test` | 205 unit tests (mappers, cache, client, actions, hub, poller, webhooks, probes, metrics, static) |
+| `npm test` | 229 unit tests (mappers, cache, client, actions, hub, poller, webhooks, probes, metrics, auth, static) |
 | `npm run typecheck` | Both TypeScript projects |
 | `npm run build` | Type-check, bundle the SPA into `dist/` and the BFF into `dist-server/` |
 | `npm start` | Run the built server, which then serves the built SPA too |
@@ -138,6 +138,7 @@ inline in [`.env.example`](.env.example).
 |---|---|---|
 | `COOLIFY_URL` | — | Instance root, without `/api/v1` |
 | `COOLIFY_TOKEN` | — | API token; abilities decide what works (see below) |
+| `DASHBOARD_PASSWORD` | *(empty)* | The dashboard's own password. Empty leaves every route open — set it before exposing it |
 | `BFF_PORT` / `BFF_HOST` | `8787` / `127.0.0.1` | Where the server listens (the container sets `0.0.0.0`) |
 | `DATA_DIR` | `./data` | SQLite file: KPI history and uptime samples |
 | `WEBHOOK_SECRET` | *(empty)* | Enables `/app/hooks/coolify`; empty means polling only |
@@ -153,12 +154,12 @@ ones surface as a toast naming what to add — nothing breaks silently.
 
 Read this before you put it on a public domain.
 
-- **There is no authentication in front of the dashboard yet.** Anyone who can reach it can
-  deploy, stop applications and read build logs. The container therefore publishes on
-  `127.0.0.1` by default. Put it behind an authenticating proxy (Coolify's own Traefik can
-  do Basic Auth in one label — see [docs/deployment.md](docs/deployment.md)), behind an SSO
-  proxy, or on a private network. Built-in auth is
-  [on the roadmap](docs/roadmap.md#phase-7--packaging-and-plugability).
+- **Set `DASHBOARD_PASSWORD` before giving it a domain.** The dashboard then asks for it
+  once and keeps a signed session cookie; ten wrong guesses shut the door for five minutes.
+  Leave it empty and every route stays open — anyone who can reach the port can deploy, stop
+  applications and read build logs — which is why the container publishes on `127.0.0.1` by
+  default. For per-user access or MFA, put an SSO proxy in front instead of using the
+  password ([docs/deployment.md](docs/deployment.md#putting-an-authenticating-proxy-in-front-of-it-instead)).
 - **The Coolify token never reaches the browser.** It lives in the BFF process only, which
   is the reason the BFF exists.
 - **Coolify's outgoing webhooks are unsigned** — no HMAC, no timestamp, no delivery id. The

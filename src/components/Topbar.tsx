@@ -14,11 +14,13 @@ interface Props {
   onOpenPalette: () => void
   /** resolves when Coolify has answered — the button's busy face follows it */
   onDeploy: () => Promise<unknown>
+  /** absent when the BFF has no password: there is then nothing to sign out of */
+  onSignOut?: () => void
 }
 
 export function Topbar({
   org, environments, environment, onEnvironmentChange,
-  systemStatus, searchRef, onOpenPalette, onDeploy,
+  systemStatus, searchRef, onOpenPalette, onDeploy, onSignOut,
 }: Props) {
   return (
     <header className="topbar">
@@ -40,7 +42,11 @@ export function Topbar({
           Search<kbd>⌘K</kbd>
         </button>
         <DeployButton onDeploy={onDeploy} />
-        <button className="avatar" aria-label="Account" />
+        {onSignOut ? (
+          <button className="avatar" aria-label="Sign out" title="Sign out" onClick={onSignOut} />
+        ) : (
+          <span className="avatar" aria-hidden="true" />
+        )}
       </div>
     </header>
   )

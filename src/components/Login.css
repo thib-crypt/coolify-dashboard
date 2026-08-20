@@ -1,0 +1,39 @@
+.login{min-height:100dvh;display:grid;place-items:center;padding:24px;background:var(--canvas)}
+.login-card{
+  width:100%;max-width:340px;padding:28px 28px 24px;border-radius:14px;
+  background:var(--surface);border:1px solid var(--line);box-shadow:var(--sh-3);
+  display:flex;flex-direction:column;
+}
+/* The mark is stroked white, so it needs the same tile it sits on in the rail. */
+.login-logo{
+  width:30px;height:30px;border-radius:9px;display:grid;place-items:center;margin-bottom:16px;
+  background:linear-gradient(180deg,#3b82f6,#1d4ed8);
+  box-shadow:0 1px 2px rgba(29,78,216,.35),inset 0 1px 0 rgba(255,255,255,.35);
+}
+.login-logo svg{width:16px;height:16px}
+.login-card h1{font-size:16px;font-weight:600;letter-spacing:-.02em;color:var(--t1);margin:0}
+.login-card .sub{font-size:12.5px;line-height:1.5;color:var(--t3);margin:5px 0 20px}
+.field{display:flex;flex-direction:column;gap:6px}
+.field span{font-size:12px;font-weight:500;color:var(--t2)}
+.field input{
+  width:100%;padding:8px 11px;border-radius:8px;
+  border:1px solid var(--line-2);background:var(--surface-2);
+  font-size:13.5px;color:var(--t1);
+  transition:border-color 140ms ease,box-shadow 140ms ease,background-color 140ms ease;
+}
+.field input:focus{
+  outline:none;background:var(--surface);border-color:var(--accent);
+  box-shadow:0 0 0 3px var(--accent-soft);
+}
+.field input[aria-invalid="true"]{border-color:var(--err)}
+.field input:disabled{opacity:.6}
+.login-error{font-size:12px;line-height:1.5;color:var(--err);margin:10px 0 0}
+.login-error .hint{color:var(--t3)}
+.login-card button{
+  margin-top:18px;padding:9px 14px;border-radius:8px;
+  background:var(--accent);color:#fff;font-size:13px;font-weight:500;
+  box-shadow:var(--sh-1);transition:background-color 160ms ease,transform 140ms var(--ease-out),opacity 140ms ease;
+}
+.login-card button:hover:not(:disabled){background:var(--accent-2)}
+.login-card button:active:not(:disabled){transform:scale(.98)}
+.login-card button:disabled{opacity:.5;cursor:default}

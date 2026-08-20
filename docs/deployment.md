@@ -4,18 +4,18 @@ The dashboard ships as a single container: one Node process that serves the buil
 the `/app/*` API from the same origin. Nothing else is required — SQLite is a file, and the
 only outbound traffic is to your Coolify instance and to your own applications.
 
-> **Read [the Security section of the README](../README.md#security) first.** There is no
-> authentication in front of the dashboard yet. Whoever reaches it can deploy and stop
-> things. Everything below assumes you either keep it private or put an authenticating proxy
-> in front of it.
+> **Set `DASHBOARD_PASSWORD` before giving this a domain.** Without it every route is open,
+> and whoever reaches the port can deploy and stop things — see
+> [the password](#the-password) below and [the Security section of the
+> README](../README.md#security).
 
 ## Anywhere Docker runs
 
 ```bash
 git clone https://github.com/thib-crypt/coolify-dashboard.git
 cd coolify-dashboard
-cp .env.example .env      # COOLIFY_URL and COOLIFY_TOKEN at minimum
-docker compose up -d --build
+cp .env.example .env      # COOLIFY_URL, COOLIFY_TOKEN, and DASHBOARD_PASSWORD
+docker compose up -d
 ```
 
 `docker-compose.yml` publishes on `127.0.0.1:8787` deliberately. The image sets
@@ -56,8 +56,9 @@ watches — with the caveat that it then goes down with it, which is the one mom
 want it.
 
 1. **New Resource → Docker Compose**, pointed at this repository (or a fork of it).
-2. **Set the environment variables** in Coolify's UI: `COOLIFY_URL`, `COOLIFY_TOKEN`, and
-   whichever optional ones you want from [configuration.md](configuration.md).
+2. **Set the environment variables** in Coolify's UI: `COOLIFY_URL`, `COOLIFY_TOKEN`,
+   `DASHBOARD_PASSWORD` — it is about to have a public domain — and whichever optional ones
+   you want from [configuration.md](configuration.md).
 3. **Remove the `ports:` block** from `docker-compose.yml` in your fork, or leave it: the
    Coolify proxy reaches the container over the Docker network either way, and a published
    loopback port is only there for the standalone case.
@@ -68,7 +69,28 @@ want it.
    in [coolify-setup.md](coolify-setup.md#4-optional--the-outgoing-webhook). This is the
    step that makes the dashboard react instantly instead of within a few seconds.
 
-### Putting authentication in front of it
+### The password
+
+Set `DASHBOARD_PASSWORD` and the dashboard asks for it once, then keeps a signed session
+cookie (`SESSION_TTL_HOURS`, a week by default). That is what makes it safe to give this
+container a domain: without it, `/app/deploy` and `/app/applications/{uuid}/stop` are
+unauthenticated writes, and the BFF says so at boot when it is bound to anything other than
+loopback.
+
+The cookie is `HttpOnly` and `SameSite=Lax`, and gets `Secure` automatically when the
+request arrives over https — including through a proxy that terminates TLS and sets
+`X-Forwarded-Proto`. Nothing is stored server-side, so a redeploy does not sign you out.
+
+Ten failed attempts shut the door for five minutes. Behind a proxy that throttle is global
+rather than per-client, because the only address the BFF can trust is the proxy's — see
+[configuration.md](configuration.md#the-front-door).
+
+### Putting an authenticating proxy in front of it instead
+
+One shared password is the ceiling of what this implements. For per-user access, revocation
+or MFA, terminate authentication in front of it — and then leave `DASHBOARD_PASSWORD` unset
+rather than asking for two passwords, keeping the dashboard bound so that only the proxy can
+reach it.
 
 Coolify runs Traefik, which does Basic Auth with two labels. In your compose service:
 
@@ -82,9 +104,9 @@ Generate the hash with `htpasswd -nB admin` and **double every `$`** — Compose
 single ones. Browsers keep sending those credentials on the SSE stream, since it is
 same-origin, so the live channel keeps working.
 
-For anything more than one shared password, put an SSO proxy (oauth2-proxy, Authelia,
-Authentik, Cloudflare Access) in front instead. Built-in sessions are
-[on the roadmap](roadmap.md#phase-7--packaging-and-plugability).
+For anything more than one shared password, an SSO proxy (oauth2-proxy, Authelia,
+Authentik, Cloudflare Access) is the better shape: it can revoke one person's access without
+changing a secret that everyone shares.
 
 ## Behind your own reverse proxy
 

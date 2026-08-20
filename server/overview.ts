@@ -69,7 +69,7 @@ export interface OverviewDeps {
 export interface OverviewService {
   build(requestedEnv: string | null): Promise<OverviewResponse>
   /** `live`, `probes` and `metrics` are the route's to add — the aggregator owns none. */
-  health(): Promise<Omit<HealthResponse, 'live' | 'probes' | 'metrics'>>
+  health(): Promise<Omit<HealthResponse, 'auth' | 'live' | 'probes' | 'metrics'>>
 }
 
 /** Message worth showing a human, out of whatever went wrong upstream. */
@@ -564,7 +564,9 @@ export function createOverviewService(deps: OverviewDeps): OverviewService {
     }
   }
 
-  async function health(): Promise<Omit<HealthResponse, 'live' | 'probes' | 'metrics'>> {
+  // `auth` is added by the route, which is the only place that can see the
+  // request's cookie; everything else here is a property of the process.
+  async function health(): Promise<Omit<HealthResponse, 'auth' | 'live' | 'probes' | 'metrics'>> {
     const notes: DegradedNote[] = []
     const version = await optional('version', 'coolify', TTL.version, () => client.version(), null, notes)
     return {

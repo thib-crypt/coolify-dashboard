@@ -3,10 +3,19 @@
 
 import type { Dashboard, DeploymentState } from './dashboard'
 
-export interface HealthResponse {
+/**
+ * What `GET /app/health` answers to a caller with no session, once
+ * `DASHBOARD_PASSWORD` is set. It is deliberately thin: the full body names the
+ * Coolify instance and its version, and a liveness probe does not need either.
+ */
+export interface GuardedHealthResponse {
   ok: boolean
   service: 'coolify-dashboard-bff'
   now: string
+  auth: AuthStatus
+}
+
+export interface HealthResponse extends GuardedHealthResponse {
   coolify: {
     /** false when COOLIFY_URL / COOLIFY_TOKEN are missing */
     configured: boolean
@@ -22,6 +31,20 @@ export interface HealthResponse {
   probes: ProbeStatus
   /** state of the Sentinel metrics collector (phase 5) */
   metrics: MetricsStatus
+}
+
+/** Whether this deployment has a front door, and whether the caller is through it. */
+export interface AuthStatus {
+  /** true once DASHBOARD_PASSWORD is set on the BFF */
+  required: boolean
+  /** always true when `required` is false — an open dashboard admits everyone */
+  authenticated: boolean
+}
+
+/** Answer of `GET`, `POST` and `DELETE` on `/app/session`. */
+export interface SessionResponse extends AuthStatus {
+  /** when the current session stops being valid, null when there is none */
+  expiresAt: string | null
 }
 
 /**
@@ -113,6 +136,9 @@ export interface AutoDeployRequest {
 
 export type BffErrorCode =
   | 'not_configured'
+  /** the *dashboard* has a password and this request carried no session */
+  | 'unauthenticated'
+  /** Coolify refused the BFF's token — not to be confused with the above */
   | 'unauthorized'
   | 'forbidden'
   | 'not_found'

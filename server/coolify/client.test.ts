@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, describe, it } from 'node:test'
 import type { ConfiguredBffConfig } from '../config'
+import { DEFAULT_SESSION_TTL_MS } from '../auth'
 import { DEFAULT_METRICS_CONFIG } from '../metrics'
 import { DEFAULT_PROBE_CONFIG } from '../probes'
 import { CoolifyError, classify, createCoolifyClient } from './client'
@@ -17,6 +18,7 @@ const config: ConfiguredBffConfig = {
   webhookSecret: null,
   pollActiveMs: 3000,
   pollIdleMs: 15000,
+  auth: { password: null, sessionSecret: null, sessionTtlMs: DEFAULT_SESSION_TTL_MS },
   probes: { ...DEFAULT_PROBE_CONFIG, enabled: false },
   metrics: { ...DEFAULT_METRICS_CONFIG },
 }

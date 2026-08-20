@@ -1,4 +1,5 @@
 import { serve } from '@hono/node-server'
+import { getConnInfo } from '@hono/node-server/conninfo'
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { streamSSE } from 'hono/streaming'
@@ -8,6 +9,7 @@ import type {
   BffErrorCode,
   BffErrorResponse,
   DegradedNote,
+  GuardedHealthResponse,
   HealthResponse,
   LiveEvent,
   LiveStatus,
@@ -17,6 +19,7 @@ import type {
 } from '../shared/bff'
 import type * as Api from '../shared/coolify-api'
 import { createActionService, type ActionService } from './actions'
+import { createAuth, mountSession } from './auth'
 import { TTL, TtlCache } from './cache'
 import { isConfigured, loadConfig, loadEnvFile, missingConfig } from './config'
 import { CoolifyError, createCoolifyClient, type ApplicationAction, type TaskOwner } from './coolify/client'
@@ -39,6 +42,27 @@ const cache = new TtlCache()
 
 const configured = isConfigured(config) ? config : null
 const client = configured ? createCoolifyClient(configured) : null
+
+// The dashboard's own front door. With no `DASHBOARD_PASSWORD` this is a
+// no-op gate and every route stays open, which is what a loopback bind and a
+// development session want.
+const auth = createAuth(config.auth)
+
+/**
+ * Who is knocking, for the sign-in throttle only. Deliberately the socket
+ * address rather than `X-Forwarded-For`: the header is set by whoever sends it,
+ * so trusting it would hand an attacker an unlimited number of identities.
+ * Behind a reverse proxy every client therefore shares the proxy's bucket, and
+ * the throttle becomes global — see the note in `auth.ts`.
+ */
+const clientAddress = (c: Context): string => {
+  try {
+    return getConnInfo(c).remote.address ?? 'unknown'
+  } catch {
+    // No node-server env — a unit test, or another runtime entirely.
+    return 'unknown'
+  }
+}
 
 // Webhook-only readings (disk usage) survive here between two deliveries.
 const signals = createSignalStore()
@@ -271,12 +295,36 @@ const notConfigured: BffErrorResponse = {
 
 const app = new Hono()
 
+/**
+ * The front door goes on before anything it protects. `/app/session`,
+ * `/app/health` and the webhook receiver stay public — the first is how a
+ * session is obtained, the second is what a container health check calls, and
+ * the third authenticates with its own secret because Coolify cannot hold a
+ * cookie.
+ */
+mountSession(app, auth, config.auth, clientAddress)
+app.use('/app/*', auth.guard)
+
 app.get('/app/health', async c => {
+  // Public, so that a container health check and an uptime monitor can reach it
+  // without a session — which is exactly why it says so little until one is
+  // presented. The full body names the instance and its version.
+  if (!auth.isAuthenticated(c)) {
+    const body: GuardedHealthResponse = {
+      ok: service !== null,
+      service: 'coolify-dashboard-bff',
+      now: new Date().toISOString(),
+      auth: auth.status(c),
+    }
+    return c.json(body, service ? 200 : 503)
+  }
+
   if (!service) {
     const body: HealthResponse = {
       ok: false,
       service: 'coolify-dashboard-bff',
       now: new Date().toISOString(),
+      auth: auth.status(c),
       coolify: { configured: false, url: config.coolifyUrl, version: null },
       notes: [{ scope: 'config', reason: notConfigured.error.message }],
       live: liveStatus(),
@@ -287,7 +335,7 @@ app.get('/app/health', async c => {
   }
   const health = await service.health()
   return c.json(
-    { ...health, live: liveStatus(), probes: probeStatus(), metrics: metricsStatus() },
+    { ...health, auth: auth.status(c), live: liveStatus(), probes: probeStatus(), metrics: metricsStatus() },
     health.ok ? 200 : 502,
   )
 })
@@ -316,8 +364,9 @@ app.get('/app/overview', async c => {
 const SSE_KEEPALIVE_MS = 25_000
 /**
  * A browser opens one stream per tab, so this is generous for its purpose and
- * still bounds an endpoint that holds a socket open and has no auth in front of
- * it yet (`DASHBOARD_PASSWORD` lands in phase 7).
+ * still bounds an endpoint that holds a socket open — a limit that matters most
+ * when `DASHBOARD_PASSWORD` is unset and anyone who can reach the BFF can open
+ * one.
  */
 const MAX_SSE_SUBSCRIBERS = 64
 
@@ -506,6 +555,16 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
       ? `→ serving the built dashboard from ${staticRoot}`
       : '→ API only — run `npm run dev` for the front end, or `npm run build` to serve it from here',
   )
+  console.log(
+    auth.required
+      ? `→ password protected · sessions last ${Math.round(config.auth.sessionTtlMs / 3_600_000)}h`
+      : '→ NO PASSWORD — anyone who can reach this port can deploy and stop things (set DASHBOARD_PASSWORD)',
+  )
+  if (!auth.required && config.host !== '127.0.0.1' && config.host !== 'localhost') {
+    console.warn(
+      `→ WARNING: bound to ${config.host} without a password. Put a proxy that authenticates in front of it, or set DASHBOARD_PASSWORD.`,
+    )
+  }
   console.log(
     service
       ? `→ Coolify ${config.coolifyUrl} · snapshots: ${store.kind}`

@@ -24,7 +24,7 @@ SPA renders the error with the next step. Everything else keeps working, includi
 | Variable | Default | What it does |
 |---|---|---|
 | `BFF_PORT` | `8787` | Port to listen on. Takes precedence over `PORT`, which dev tooling likes to inject. |
-| `BFF_HOST` | `127.0.0.1` | Interface to bind. Loopback by default **because the dashboard has no authentication of its own** — the container sets `0.0.0.0` and expects a proxy in front. |
+| `BFF_HOST` | `127.0.0.1` | Interface to bind. Loopback by default, because a dashboard with no `DASHBOARD_PASSWORD` is an unauthenticated write API. The container sets `0.0.0.0` and warns at boot if it does that without a password. |
 | `STATIC_DIR` | `dist` | Built SPA to serve alongside the API. Set it to empty to run the BFF API-only; a directory with no `index.html` is ignored (which is what development wants — Vite serves the front end there). |
 | `DATA_DIR` | `./data` | Where `dashboard.sqlite` lives: KPI history and uptime samples. Back this up, or accept that both restart from zero. |
 | `COOLIFY_TIMEOUT_MS` | `10000` | Budget for one upstream request. |
@@ -33,6 +33,28 @@ SPA renders the error with the next step. Everything else keeps working, includi
 If `node:sqlite` is unavailable in your runtime, the store falls back to an in-process ring
 buffer: the dashboard renders identically but forgets its history on restart. Node 24+ has
 it out of the box.
+
+## The front door
+
+| Variable | Default | What it does |
+|---|---|---|
+| `DASHBOARD_PASSWORD` | *(empty)* | Sets the password the dashboard asks for. Empty leaves **every route open**, which is the pre-1.0 behaviour and is only safe on loopback or a private network. |
+| `SESSION_SECRET` | *(the password)* | Key that signs the session cookie. Defaulting to the password means changing the password signs everyone out; set it explicitly if you would rather it did not, or if several replicas must accept each other's cookies. |
+| `SESSION_TTL_HOURS` | `168` | How long a session lasts before the password is asked for again. |
+
+One password, no user list: this is a companion to one Coolify instance, and the API token
+it already holds is a single shared credential. The password is exchanged once at
+`POST /app/session` for an `HttpOnly`, `SameSite=Lax` cookie carrying a signed expiry — no
+server-side session store, so restarting the container does not sign anyone out.
+
+Ten failed attempts shut the door for five minutes. The counter is keyed on the connecting
+address, which behind a reverse proxy is the proxy: the throttle is then effectively global,
+because trusting `X-Forwarded-For` instead would let an attacker rotate the header and never
+be throttled at all.
+
+What stays reachable without a session: `GET /app/health` (a container health check needs
+it — it answers a thin body until you sign in), and `POST /app/hooks/coolify`, which
+authenticates with `WEBHOOK_SECRET` because Coolify cannot hold a cookie.
 
 ## The live channel
 

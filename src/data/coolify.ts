@@ -4,7 +4,7 @@
    rate limit. Components never learn the difference: they only see `Dashboard`
    and `ActionResponse`. */
 
-import { DashboardError } from './types'
+import { DashboardError, SESSION_LOST } from './types'
 import type {
   ActionResponse,
   Dashboard,
@@ -13,6 +13,7 @@ import type {
   LiveUpdate,
   Server,
   ServerMetrics,
+  SessionResponse,
 } from './types'
 import type { BffErrorResponse, LiveEvent, OverviewResponse } from '@shared/bff'
 
@@ -24,6 +25,11 @@ async function readError(res: Response): Promise<DashboardError> {
     // non-JSON error (proxy, dev server) — fall through to the status line
   }
   const error = body.error
+  // A 401 means this browser's session is gone, whatever it was asking for.
+  // Said once, here, so no caller has to recognise it: the gate listens.
+  if (res.status === 401 && error?.code === 'unauthenticated') {
+    dispatchEvent(new Event(SESSION_LOST))
+  }
   return new DashboardError(
     error?.code ?? 'internal',
     error?.message ?? `The dashboard API answered ${res.status} ${res.statusText}.`,
@@ -62,6 +68,16 @@ export function createBffSource(basePath = '/app'): DataSource {
   }
 
   const app = (id: string) => `/applications/${encodeURIComponent(id)}`
+
+  /** The session routes answer the same shape whatever the verb. */
+  async function session(method: 'GET' | 'POST' | 'DELETE', body?: unknown): Promise<SessionResponse> {
+    const res = await call('/session', {
+      method,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    })
+    if (!res.ok) throw await readError(res)
+    return (await res.json()) as SessionResponse
+  }
 
   return {
     async getDashboard(env: EnvironmentName | null): Promise<Dashboard> {
@@ -116,5 +132,9 @@ export function createBffSource(basePath = '/app'): DataSource {
     stopApplication: appId => act(`${app(appId)}/stop`),
     runScheduledTask: (owner, ownerId, taskId) =>
       act(`/${owner}s/${encodeURIComponent(ownerId)}/tasks/${encodeURIComponent(taskId)}/run`),
+
+    getSession: () => session('GET'),
+    signIn: password => session('POST', { password }),
+    signOut: () => session('DELETE'),
   }
 }

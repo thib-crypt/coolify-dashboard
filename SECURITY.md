@@ -23,6 +23,8 @@ section will say which ones get fixes.
 | Secret | Where it lives | Blast radius if leaked |
 |---|---|---|
 | `COOLIFY_TOKEN` | The BFF process only — never sent to the browser | Everything the token's abilities allow on your Coolify instance |
+| `DASHBOARD_PASSWORD` | The BFF process; typed by whoever signs in | Everything the dashboard can do: read the fleet, deploy, restart, stop |
+| `SESSION_SECRET` | The BFF process (defaults to the password) | Forged session cookies — equivalent to knowing the password |
 | `WEBHOOK_SECRET` | The BFF, and the webhook URL stored in Coolify | Forged dashboard notifications and cache invalidations. Not a path into Coolify. |
 | `METRICS_SSH_KEY` | Mounted into the container, read by `ssh` | Whatever that key opens on your servers — use a dedicated one |
 | Deployment logs | Held in memory while a build runs, pushed over SSE | Coolify redacts secret values before serving them, but build output is still sensitive |
@@ -30,16 +32,29 @@ section will say which ones get fixes.
 
 ## Known limitations
 
-**There is no authentication in front of the dashboard.** This is the one you must design
-around. Anyone who can reach the HTTP port can read your fleet's state and trigger deploys,
-restarts and stops. Mitigations, in order of preference:
+**Without `DASHBOARD_PASSWORD`, every route is open.** That is still the default, so that an
+existing deployment does not lock its owner out on upgrade — but it means anyone who can
+reach the HTTP port can read your fleet's state and trigger deploys, restarts and stops. In
+order of preference:
 
-1. Keep it on a private network or bound to loopback (the default: `BFF_HOST=127.0.0.1`, and
-   the compose file publishes on `127.0.0.1` too).
-2. Put an authenticating proxy in front — Basic Auth on Coolify's Traefik is two labels, and
-   an SSO proxy is better ([deployment.md](docs/deployment.md#putting-authentication-in-front-of-it)).
-3. Wait for built-in sessions, which are the top item of
-   [phase 7](docs/roadmap.md#phase-7--packaging-and-plugability).
+1. **Set `DASHBOARD_PASSWORD`.** One password, exchanged for a signed session cookie. This is
+   what makes a public domain reasonable ([configuration.md](docs/configuration.md#the-front-door)).
+2. Put an authenticating proxy in front instead, if you need per-user access or MFA — Basic
+   Auth on Coolify's Traefik is two labels, and an SSO proxy is
+   better ([deployment.md](docs/deployment.md#putting-an-authenticating-proxy-in-front-of-it-instead)).
+3. Failing both, keep it on a private network or bound to loopback (the default:
+   `BFF_HOST=127.0.0.1`, and the compose file publishes on `127.0.0.1` too).
+
+**One password means no per-user revocation.** Everyone who signs in is the same principal,
+and changing the password is the only way to remove access — which does sign everyone out,
+since the signing key derives from it unless `SESSION_SECRET` is set. A user list would
+suggest a separation of privilege that does not exist behind it: the dashboard holds one
+Coolify token, and everyone who gets in is using it.
+
+**A determined attacker can lock you out for five minutes.** Ten failed sign-ins shut the
+door, counted per connecting address — which behind a reverse proxy is the proxy, making the
+throttle global. The alternative, keying on `X-Forwarded-For`, would let an attacker rotate
+the header and never be throttled at all; a short shared lockout is the safer failure.
 
 **Coolify's outgoing webhooks are unsigned**, so `/app/hooks/coolify` authenticates with a
 secret in the query string. That secret will appear in the access logs of anything between

@@ -233,6 +233,17 @@ export const mockSource: DataSource = {
   async runScheduledTask() {
     return { outcome: 'queued', message: 'Scheduled task execution queued.' }
   },
+
+  // No BFF behind the mock, so no door to knock on: the UI goes straight in.
+  async getSession() {
+    return { required: false, authenticated: true, expiresAt: null }
+  },
+  async signIn() {
+    return { required: false, authenticated: true, expiresAt: null }
+  },
+  async signOut() {
+    return { required: false, authenticated: true, expiresAt: null }
+  },
 }
 
 export const INITIAL_TRAFFIC = () => 1100 + Math.random() * 300

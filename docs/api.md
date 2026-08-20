@@ -17,6 +17,7 @@ All responses are JSON unless stated otherwise. Errors share one envelope:
 | `code` | HTTP | Means |
 |---|---|---|
 | `not_configured` | 503 | `COOLIFY_URL` / `COOLIFY_TOKEN` missing, or the route needs a secret that is not set |
+| `unauthenticated` | 401 | The **dashboard** has a password and this request carried no session — not to be confused with `unauthorized`, which is Coolify refusing the BFF's token |
 | `unauthorized` | 502 | Coolify rejected the token (it answers **400 `Invalid token.`**, translated here) |
 | `forbidden` | 502 | Missing ability, insufficient team role, API disabled, or IP not allowlisted — the `hint` says which |
 | `not_found` | 404 | Deleted, or owned by another team |
@@ -27,6 +28,41 @@ All responses are JSON unless stated otherwise. Errors share one envelope:
 | `upstream_error` | 502 | Anything else Coolify returned |
 | `internal` | 400 / 500 | Malformed request, or a bug here |
 
+## The session
+
+Everything under `/app/*` needs a session once `DASHBOARD_PASSWORD` is set, with three
+exceptions: `/app/session` itself, `GET /app/health` (a container health check has no
+cookie) and `POST /app/hooks/coolify` (Coolify has none either — that route authenticates
+with `WEBHOOK_SECRET`). With no password configured, nothing is guarded and the routes below
+still answer, saying `required: false`.
+
+The session is a resource, so it has three verbs on one path.
+
+### `GET /app/session`
+
+```json
+{ "required": true, "authenticated": false, "expiresAt": null }
+```
+
+### `POST /app/session`
+
+Body: `{ "password": "…" }`. On success it sets an `HttpOnly`, `SameSite=Lax` cookie
+(`Secure` when the request arrived over https, including via `X-Forwarded-Proto`) and
+answers the same shape with `authenticated: true` and the expiry.
+
+The cookie is `v1.<expiry>.<HMAC-SHA256>`: it carries its own expiry, so there is no
+server-side session store and a restart signs nobody out. The signing key is derived from
+`SESSION_SECRET`, or from the password when that is unset — which is what makes a password
+change invalidate every existing session.
+
+Wrong password: `401 unauthenticated`. Ten failures from one address shut the door for five
+minutes: `429 rate_limited` with `Retry-After`, and the right password does not open it
+until the lockout passes.
+
+### `DELETE /app/session`
+
+Expires the cookie. Always `200`.
+
 ## Reads
 
 ### `GET /app/health`
@@ -35,11 +71,17 @@ Whether every moving part is working, and what it cannot do. `200` when Coolify 
 `502` when it does not, `503` when the BFF has no configuration at all — the body is the
 same shape in all three cases, so a monitor can read it rather than guess from the status.
 
+This is the one read that stays reachable without a session, because a container health
+check and an uptime monitor have no cookie. Without one it answers only `ok`, `service`,
+`now` and `auth` — the full body names your instance and its version, and a liveness probe
+does not need either.
+
 ```json
 {
   "ok": true,
   "service": "coolify-dashboard-bff",
   "now": "2026-08-20T10:01:04.599Z",
+  "auth":    { "required": true, "authenticated": true },
   "coolify": { "configured": true, "url": "https://coolify.example.com", "version": "v4.3.2" },
   "notes": [{ "scope": "metrics", "reason": "No SSH key, so CPU and RAM stay unknown." }],
   "live":    { "subscribers": 1, "poller": "active", "webhooks": "ready",

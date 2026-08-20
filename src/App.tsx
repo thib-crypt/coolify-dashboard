@@ -7,6 +7,7 @@ import { FleetPanel } from './components/FleetPanel'
 import { InsightsPanel } from './components/InsightsPanel'
 import { KpiGrid } from './components/KpiGrid'
 import { LoadError } from './components/LoadError'
+import { Login } from './components/Login'
 import { PageHead } from './components/PageHead'
 import { PulseStrip } from './components/PulseStrip'
 import { Rail } from './components/Rail'
@@ -14,9 +15,25 @@ import { SchedulePanel } from './components/SchedulePanel'
 import { Toasts } from './components/Toasts'
 import { Topbar } from './components/Topbar'
 import { useLiveDashboard } from './hooks/useLiveDashboard'
+import { useSession } from './hooks/useSession'
 import { useToast } from './hooks/useToasts'
 
+/**
+ * The session gate (phase 7). `Dashboard` is mounted only once the door is
+ * open, which is what keeps `useLiveDashboard` from opening an SSE stream and
+ * a refetch loop that would only ever collect 401s.
+ */
 export default function App() {
+  const { state, required, signIn, signOut } = useSession()
+
+  // One request long, and only on a cold load. A sign-in form that appears and
+  // then vanishes is worse than a frame of nothing.
+  if (state === 'unknown') return null
+  if (state === 'locked') return <Login onSubmit={signIn} />
+  return <Dashboard {...(required ? { onSignOut: signOut } : {})} />
+}
+
+function Dashboard({ onSignOut }: { onSignOut?: () => void }) {
   const { toast } = useToast()
   // The hook owns the payload, the SSE channel and the fallback poll: this
   // component only reacts to what it publishes.
@@ -162,6 +179,7 @@ export default function App() {
             onEnvironmentChange={setEnvironment}
             systemStatus={data.systemStatus}
             searchRef={searchRef}
+            {...(onSignOut ? { onSignOut } : {})}
             onOpenPalette={() => setPaletteOpen(true)}
             onDeploy={() => {
               const target = data.applications[0]

@@ -7,6 +7,12 @@ this project follows [semantic versioning](https://semver.org/) from 1.0.0 onwar
 
 ### Added
 
+- **A password on the dashboard itself.** `DASHBOARD_PASSWORD` is exchanged once at
+  `POST /app/session` for an `HttpOnly`, `SameSite=Lax` cookie carrying a signed expiry —
+  no server-side session store, so a restart signs nobody out. Ten failed attempts shut the
+  door for five minutes. Unset, every route stays open exactly as before: an upgrade cannot
+  lock anyone out of their own dashboard.
+
 - **Packaging.** Multi-stage `Dockerfile` and `docker-compose.yml`: one container that
   serves the built SPA and the API, running as a non-root user, with a health check and a
   volume for the SQLite history.

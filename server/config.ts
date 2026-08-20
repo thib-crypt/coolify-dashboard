@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { DEFAULT_SESSION_TTL_MS, type AuthConfig } from './auth'
 import { DEFAULT_METRICS_CONFIG, type MetricsConfig, type StrictHostKey } from './metrics'
 import { POLL_ACTIVE_MS, POLL_IDLE_MS } from './poller'
 import { DEFAULT_PROBE_CONFIG, type ProbeConfig } from './probes'
@@ -9,9 +10,10 @@ export interface BffConfig {
   coolifyToken: string | null
   port: number
   /**
-   * Interface to bind. Loopback by default, because the dashboard has no
-   * authentication of its own yet; a container overrides it to `0.0.0.0` and
-   * puts a proxy in front (see docs/DEPLOYMENT.md).
+   * Interface to bind. Loopback by default: an unconfigured dashboard has no
+   * password, and the write endpoints behind it stop production. The container
+   * overrides it to `0.0.0.0` — and warns at boot when it does that without a
+   * `DASHBOARD_PASSWORD` (see docs/deployment.md).
    */
   host: string
   /**
@@ -38,6 +40,8 @@ export interface BffConfig {
   probes: ProbeConfig
   /** Sentinel collector over SSH — the only source of CPU/RAM (phase 5) */
   metrics: MetricsConfig
+  /** the dashboard's own password, and how its session cookie is signed (phase 7) */
+  auth: AuthConfig
 }
 
 export interface ConfiguredBffConfig extends BffConfig {
@@ -105,6 +109,20 @@ function loadMetricsConfig(env: NodeJS.ProcessEnv): MetricsConfig {
   }
 }
 
+/**
+ * The dashboard's front door. Everything here is optional, and leaving the
+ * password empty keeps the pre-phase-7 behaviour — an open BFF, which
+ * `index.ts` refuses to bind to a public interface without saying so.
+ */
+function loadAuthConfig(env: NodeJS.ProcessEnv): AuthConfig {
+  const hours = Number(env.SESSION_TTL_HOURS ?? DEFAULT_SESSION_TTL_MS / 3_600_000)
+  return {
+    password: env.DASHBOARD_PASSWORD?.trim() || null,
+    sessionSecret: env.SESSION_SECRET?.trim() || null,
+    sessionTtlMs: Number.isFinite(hours) && hours > 0 ? hours * 3_600_000 : DEFAULT_SESSION_TTL_MS,
+  }
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): BffConfig {
   const url = env.COOLIFY_URL?.trim()
   const token = env.COOLIFY_TOKEN?.trim()
@@ -125,6 +143,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BffConfig {
     pollIdleMs: Number(env.POLL_IDLE_MS ?? POLL_IDLE_MS),
     probes: loadProbeConfig(env),
     metrics: loadMetricsConfig(env),
+    auth: loadAuthConfig(env),
   }
 }
 
