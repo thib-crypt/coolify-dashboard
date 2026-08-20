@@ -3,7 +3,11 @@
 Notable changes, newest first. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project follows [semantic versioning](https://semver.org/) from 1.0.0 onwards.
 
-## [Unreleased]
+## [1.0.0] — 2026-08-20
+
+First release. Phases 0–6 are done, and phase 7 is done except for two data sources Coolify
+itself does not expose (see [docs/roadmap.md](docs/roadmap.md)). What landed since the five
+phases below:
 
 ### Added
 
@@ -75,3 +79,5 @@ and what was rejected in [docs/roadmap.md](docs/roadmap.md):
   when it did nothing.
 - **Phase 1 — Live data.** The `/app/overview` aggregator, per-family TTL caching with
   single-flight, pure mappers, and hourly SQLite snapshots for the KPI deltas.
+
+[1.0.0]: https://github.com/thib-crypt/coolify-dashboard/releases/tag/v1.0.0

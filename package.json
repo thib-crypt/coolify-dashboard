@@ -1,6 +1,6 @@
 {
   "name": "coolify-dashboard",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "A real-time companion dashboard for a self-hosted Coolify instance: live fleet, deployments, uptime and one-key actions, behind a BFF that keeps your API token server-side.",
   "license": "MIT",
