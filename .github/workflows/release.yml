@@ -79,7 +79,7 @@ jobs:
           sbom: true
 
       # Proof that this digest came out of this workflow, from this commit.
-      - uses: actions/attest-build-provenance@v3
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.build.outputs.digest }}
